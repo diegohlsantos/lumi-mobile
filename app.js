@@ -377,13 +377,29 @@ try { $('#speak-toggle').checked = localStorage.getItem(SPEAK_KEY) === '1'; } ca
 $('#speak-toggle').addEventListener('change', () => { try { localStorage.setItem(SPEAK_KEY, $('#speak-toggle').checked ? '1' : '0'); } catch {} });
 $('#logout').addEventListener('click', async () => { await sb.auth.signOut(); location.reload(); });
 
-$('#login-form').addEventListener('submit', async (e) => {
-  e.preventDefault();
+// Login por código no e-mail (o mesmo do MailDesk)
+async function sendCode() {
+  const email = $('#login-email').value.trim();
+  if (!email) return;
   $('#login-btn').disabled = true; $('#login-err').textContent = '';
-  const { error } = await sb.auth.signInWithPassword({ email: $('#login-email').value.trim(), password: $('#login-pass').value });
+  const { error } = await sb.auth.signInWithOtp({ email, options: { shouldCreateUser: false } });
   $('#login-btn').disabled = false;
-  if (error) $('#login-err').textContent = error.message === 'Invalid login credentials' ? 'E-mail ou senha incorretos.' : error.message;
-});
+  if (error) {
+    $('#login-err').textContent = /not allowed|not found/i.test(error.message) ? 'Esse e-mail não tem conta no MailDesk.'
+      : /rate|seconds/i.test(error.message) ? 'Espere alguns segundos antes de pedir outro código.' : error.message;
+    return;
+  }
+  $('#code-step').hidden = false;
+  $('#login-btn').hidden = true;
+  $('#login-code').focus();
+}
+async function verifyCode() {
+  const { error } = await sb.auth.verifyOtp({ email: $('#login-email').value.trim(), token: $('#login-code').value.trim(), type: 'email' });
+  if (error) $('#login-err').textContent = /expired|invalid/i.test(error.message) ? 'Código inválido ou vencido. Peça outro.' : error.message;
+}
+$('#login-form').addEventListener('submit', (e) => { e.preventDefault(); if ($('#code-step').hidden) sendCode(); else verifyCode(); });
+$('#verify-btn').addEventListener('click', verifyCode);
+$('#resend-btn').addEventListener('click', sendCode);
 
 // ---------- Início ----------
 LumiFace.create($('#lumi-login'));

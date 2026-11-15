@@ -22,9 +22,14 @@
       <h1>Oi! Eu sou a Lumi ✨</h1>
       <p class="muted">Entre com a mesma conta do MailDesk.</p>
       <form id="login-form">
-        <input id="login-email" type="email" autocomplete="username" placeholder="E-mail" required />
-        <input id="login-pass" type="password" autocomplete="current-password" placeholder="Senha" required />
-        <button class="primary" id="login-btn">Entrar</button>
+        <input id="login-email" type="email" autocomplete="username" placeholder="Seu e-mail do MailDesk" required />
+        <button class="primary" id="login-btn">Enviar código</button>
+        <div id="code-step" hidden>
+          <p class="muted">Digite o código que chegou no seu e-mail.</p>
+          <input id="login-code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="Código" />
+          <button type="button" class="primary" id="verify-btn" style="margin-top:10px;width:100%">Entrar</button>
+          <button type="button" class="chip" id="resend-btn" style="margin-top:10px">Reenviar código</button>
+        </div>
         <p id="login-err" class="err"></p>
       </form>
     </div>
