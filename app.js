@@ -608,4 +608,10 @@ document.addEventListener('visibilitychange', () => { if (!document.hidden && us
 
 const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
 if (!standalone) $('#install-hint').textContent = /iPhone|iPad/.test(navigator.userAgent) ? 'Dica: Compartilhar → Adicionar à Tela de Início para usar como app.' : 'Dica: menu ⋮ → Instalar app / Adicionar à tela inicial.';
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
+if ('serviceWorker' in navigator) {
+  // Quando sai versão nova, o app se recarrega sozinho (só se já havia uma versão antiga rodando).
+  const hadController = Boolean(navigator.serviceWorker.controller);
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
+  navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then((r) => r.update()).catch(() => {});
+}
