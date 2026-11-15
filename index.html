@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#0e1016" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Lumi" />
+  <title>Lumi</title>
+  <link rel="manifest" href="manifest.webmanifest" />
+  <link rel="icon" href="icons/icon-192.png" />
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
+  <link rel="stylesheet" href="lumi-face.css" />
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <!-- Login -->
+  <section id="login" class="screen" hidden>
+    <div class="login-box">
+      <div id="lumi-login" class="face-big"></div>
+      <h1>Oi! Eu sou a Lumi ✨</h1>
+      <p class="muted">Entre com a mesma conta do MailDesk.</p>
+      <form id="login-form">
+        <input id="login-email" type="email" autocomplete="username" placeholder="E-mail" required />
+        <input id="login-pass" type="password" autocomplete="current-password" placeholder="Senha" required />
+        <button class="primary" id="login-btn">Entrar</button>
+        <p id="login-err" class="err"></p>
+      </form>
+    </div>
+  </section>
+
+  <!-- App -->
+  <section id="app" class="screen" hidden>
+    <header class="hero">
+      <div id="lumi-face" class="face"></div>
+      <div class="hero-text">
+        <div id="bubble">Oi! ✨</div>
+        <div class="meta"><span id="hero-date"></span><button id="water-btn" class="chip">💧 <b id="water-count">0</b>/<span id="water-goal">8</span></button></div>
+      </div>
+    </header>
+
+    <main id="views">
+      <!-- Conversa -->
+      <div data-view="chat" class="view active">
+        <div id="chat-log"></div>
+        <div id="suggestions">
+          <button>me lembra de ligar pro cliente em 30 minutos</button>
+          <button>como estão meus sistemas?</button>
+          <button>o que tenho pendente hoje?</button>
+          <button>copia meu pix</button>
+        </div>
+      </div>
+
+      <!-- Tarefas e lembretes -->
+      <div data-view="tasks" class="view">
+        <form id="task-form" class="row">
+          <input id="task-input" placeholder="Nova tarefa…" autocomplete="off" />
+          <button class="primary">+</button>
+        </form>
+        <ul id="task-list" class="list"></ul>
+        <h4>Lembretes</h4>
+        <form id="rem-form" class="card form">
+          <input id="rem-text" placeholder="Lembrar de…" autocomplete="off" />
+          <input id="rem-at" type="datetime-local" />
+          <div class="row">
+            <select id="rem-repeat"><option value="none">Uma vez</option><option value="daily">Todo dia</option><option value="weekdays">Dias úteis</option><option value="weekly">Toda semana</option><option value="monthly">Todo mês</option></select>
+            <select id="rem-advance"><option value="0">Sem aviso antes</option><option value="5">5 min antes</option><option value="15">15 min antes</option><option value="30">30 min antes</option><option value="60">1 h antes</option></select>
+          </div>
+          <label class="check"><input id="rem-alarm" type="checkbox" /> Alarme</label>
+          <button class="primary">Agendar</button>
+        </form>
+        <ul id="rem-list" class="list"></ul>
+      </div>
+
+      <!-- Foco -->
+      <div data-view="focus" class="view">
+        <div class="card center">
+          <div class="card-title">🍅 Pomodoro <span id="pomo-phase" class="pill"></span></div>
+          <div id="pomo-time" class="big-time">25:00</div>
+          <div class="row center"><button id="pomo-start" class="primary">Começar</button><button id="pomo-stop" class="chip">Parar</button></div>
+        </div>
+        <h4>Timers</h4>
+        <div class="presets" id="timer-presets">
+          <button data-min="3" data-label="Chá">🍵 3</button><button data-min="5">5 min</button><button data-min="10">10 min</button><button data-min="15">15 min</button><button data-min="30">30 min</button>
+        </div>
+        <ul id="timer-list" class="list"></ul>
+      </div>
+
+      <!-- Hábitos -->
+      <div data-view="habits" class="view">
+        <div id="habit-grid" class="habit-grid"></div>
+        <h4>Seu PC</h4>
+        <div id="pc-card" class="card"></div>
+      </div>
+
+      <!-- Notas -->
+      <div data-view="notes" class="view">
+        <div class="seg" id="notes-seg"><button data-sub="notes" class="active">📝 Notas</button><button data-sub="snippets">⚡ Textos rápidos</button></div>
+        <div data-sub-view="notes" class="sub active">
+          <form id="note-form" class="row"><input id="note-input" placeholder="Anotar…" autocomplete="off" /><button class="primary">+</button></form>
+          <ul id="note-list" class="list"></ul>
+        </div>
+        <div data-sub-view="snippets" class="sub">
+          <form id="snip-form" class="card form"><input id="snip-name" placeholder="Nome (ex.: pix)" autocomplete="off" /><input id="snip-text" placeholder="Conteúdo" autocomplete="off" /><button class="primary">Salvar</button></form>
+          <p class="muted">Toque para copiar.</p>
+          <ul id="snip-list" class="list"></ul>
+        </div>
+      </div>
+
+      <!-- Mais -->
+      <div data-view="more" class="view">
+        <h4>Sistemas</h4>
+        <div id="systems"></div>
+        <h4>Avisos no celular</h4>
+        <div class="card form">
+          <button id="push-btn" class="primary">🔔 Ativar notificações</button>
+          <button id="push-test" class="chip">Mandar notificação de teste</button>
+          <p id="push-status" class="muted"></p>
+          <button id="cal-btn" class="chip">📅 Adicionar ao Calendário</button>
+          <p class="muted">Lembretes e tarefas com prazo aparecem no app Calendário, com alarme. No Google Agenda: Configurações → Adicionar agenda → Por URL, e cole o link copiado.</p>
+          <button id="cal-copy" class="chip">Copiar link do calendário</button>
+        </div>
+        <h4>Conta</h4>
+        <div class="card form">
+          <label class="check"><input id="speak-toggle" type="checkbox" /> Responder falando</label>
+          <p class="muted" id="account"></p>
+          <button id="logout" class="chip">Sair</button>
+        </div>
+        <p class="muted center" id="install-hint"></p>
+      </div>
+    </main>
+
+    <form id="ask" autocomplete="off">
+      <button type="button" id="mic" title="Falar">🎙</button>
+      <input id="ask-input" placeholder="Fale com a Lumi…" />
+      <button class="primary" id="ask-send">↑</button>
+    </form>
+
+    <nav id="tabs">
+      <button data-tab="chat" class="active"><span>💬</span>Conversa</button>
+      <button data-tab="tasks"><span>✅</span>Tarefas</button>
+      <button data-tab="focus"><span>🍅</span>Foco</button>
+      <button data-tab="habits"><span>💧</span>Hábitos</button>
+      <button data-tab="notes"><span>📝</span>Notas</button>
+      <button data-tab="more"><span>⋯</span>Mais</button>
+    </nav>
+  </section>
+
+  <div id="toast"></div>
+  <script src="lumi.js"></script>
+  <script type="module" src="app.js"></script>
+</body>
+</html>
