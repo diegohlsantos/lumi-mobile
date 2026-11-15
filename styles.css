@@ -5,7 +5,7 @@
   -webkit-tap-highlight-color: transparent; font-feature-settings: "tnum" 1;
 }
 * { box-sizing: border-box; }
-html, body { margin: 0; background: var(--bg); min-height: 100%; }
+html, body { margin: 0; background: var(--bg); min-height: 100%; -webkit-text-size-adjust: 100%; }
 body { padding: env(safe-area-inset-top) 0 0; overscroll-behavior-y: contain; }
 button, input, select { font: inherit; color: inherit; }
 button { cursor: pointer; }
@@ -58,7 +58,9 @@ input[type=datetime-local] { color-scheme: dark; }
 .face-big { width: 120px; height: 120px; margin: 0 auto; }
 
 /* Topo */
-#app { display: flex; flex-direction: column; height: 100dvh; }
+#app { display: flex; flex-direction: column; position: fixed; top: env(safe-area-inset-top); left: 0; right: 0; bottom: 0; overflow: hidden; }
+#app > * { flex: none; }
+#app > #views { flex: 1 1 auto; min-height: 0; }
 .top { display: flex; gap: 12px; align-items: center; padding: 10px 16px 4px; }
 .face { width: 54px; height: 54px; flex: none; }
 .top-text { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 5px; }
