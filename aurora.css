@@ -1,0 +1,225 @@
+/* ============================================================
+   Lumi · identidade "Aurora"
+   Fundo escuro com brilhos suaves (azul, lilás, verde-água), cartões de vidro,
+   degradês na cor da Lumi e cantos arredondados. Usado na Central, no entalho,
+   nos widgets e no app do celular (o mesmo arquivo).
+   ============================================================ */
+:root {
+  --lumi2: #a78bfa;           /* lilás: segunda cor do degradê */
+  --lumi3: #5eead4;           /* verde-água: brilhos e detalhes */
+  --grad: linear-gradient(135deg, var(--lumi) 0%, var(--lumi2) 100%);
+  --grad-soft: linear-gradient(135deg, color-mix(in srgb, var(--lumi) 22%, transparent), color-mix(in srgb, var(--lumi2) 16%, transparent));
+  --ink: #090b14;
+  --text: #f4f6fb;
+  --muted: #9aa3b8;
+  --line: rgba(255, 255, 255, 0.075);
+  --glass: rgba(255, 255, 255, 0.045);
+  --glass-2: rgba(255, 255, 255, 0.08);
+  --hl: inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  --ease: cubic-bezier(.2, .8, .2, 1);
+}
+
+/* ---------- Fundo aurora (Central e celular) ---------- */
+body.aurora-bg {
+  background:
+    radial-gradient(55% 50% at 12% -5%, color-mix(in srgb, var(--lumi) 28%, transparent), transparent 70%),
+    radial-gradient(45% 45% at 95% 5%, color-mix(in srgb, var(--lumi2) 24%, transparent), transparent 70%),
+    radial-gradient(60% 50% at 70% 108%, color-mix(in srgb, var(--lumi3) 16%, transparent), transparent 70%),
+    var(--ink) !important;
+  background-attachment: fixed !important;
+}
+body.aurora-bg #main { background: transparent; }
+
+/* ---------- Texto com degradê ---------- */
+.grad-text, body.aurora-bg .hero h1, .big, .big-time, #greet {
+  background: linear-gradient(120deg, #fff 10%, color-mix(in srgb, var(--lumi) 75%, #fff) 55%, color-mix(in srgb, var(--lumi2) 80%, #fff));
+  -webkit-background-clip: text; background-clip: text; color: transparent !important;
+}
+.lvl-card b, .stat b, .meter b { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent !important; }
+.stat b { background: linear-gradient(120deg, #fff 30%, color-mix(in srgb, var(--lumi) 70%, #fff)); -webkit-background-clip: text; background-clip: text; }
+h1, h2, .page-h h2 { letter-spacing: -0.5px !important; font-weight: 700 !important; }
+
+/* ---------- Cartões de vidro ---------- */
+.card, .stat, .sys, .habit, .mode, .tile, .lvl-card, .list li:not(.empty) {
+  background: var(--glass);
+  border: 1px solid var(--line);
+  box-shadow: var(--hl);
+  -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px);
+}
+.card { border-radius: 22px; }
+.stat, .set-card, .fn, .mode, .tile, .rt-card { transition: transform .18s var(--ease), border-color .18s, background .18s, box-shadow .18s; }
+.stat:hover, .set-card:hover, .fn:hover, .mode:hover, .tile:hover, .rt-card:hover {
+  transform: translateY(-2px);
+  border-color: color-mix(in srgb, var(--lumi) 35%, transparent);
+  box-shadow: var(--hl), 0 12px 30px -12px color-mix(in srgb, var(--lumi) 35%, transparent);
+}
+.mode.on, .tile.on, .chips button.on, .days button.on {
+  border-color: transparent !important;
+  background: var(--grad-soft) !important;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--lumi) 70%, transparent) !important;
+  color: var(--text) !important;
+}
+
+/* Ícones em "pastilhas" coloridas */
+.stat .ic, .set-card .sic { border-radius: 14px !important; box-shadow: inset 0 1px 0 rgba(255,255,255,.12); }
+
+/* ---------- Botões ---------- */
+.btn.primary, .primary, button.primary, .btn-primary, #ask-send, #send {
+  background: var(--grad) !important; color: var(--ink) !important; border: 0 !important; font-weight: 700 !important;
+  box-shadow: 0 8px 22px -6px color-mix(in srgb, var(--lumi2) 55%, transparent), inset 0 1px 0 rgba(255,255,255,.35) !important;
+  transition: transform .12s var(--ease), filter .15s, box-shadow .2s !important;
+}
+.btn.primary:hover, .primary:hover, #ask-send:hover { filter: brightness(1.07) saturate(1.05); }
+.btn.primary:active, .primary:active, #ask-send:active { transform: scale(.96); }
+.btn, .chip, .chips button { border-radius: 999px; transition: background .15s, border-color .15s, color .15s, transform .12s var(--ease); }
+.btn:not(.primary), .chip, .chips button { background: var(--glass); border: 1px solid var(--line); }
+.btn:not(.primary):hover, .chip:hover, .chips button:hover { background: var(--glass-2); border-color: color-mix(in srgb, var(--lumi) 30%, transparent); color: var(--text); }
+.btn:active, .chip:active, .chips button:active { transform: scale(.96); }
+.btn.sq, .btn.icon { border-radius: 14px; }
+
+/* ---------- Campos ---------- */
+input:not([type=checkbox]):not([type=range]):not([type=color]), select, textarea {
+  background: rgba(255, 255, 255, 0.05) !important; border: 1px solid var(--line) !important; border-radius: 14px !important;
+  transition: border-color .15s, box-shadow .15s, background .15s;
+}
+input:not([type=checkbox]):not([type=range]):not([type=color]):focus, select:focus, textarea:focus {
+  background: rgba(255, 255, 255, 0.07) !important;
+  border-color: color-mix(in srgb, var(--lumi) 65%, transparent) !important;
+  box-shadow: 0 0 0 4px color-mix(in srgb, var(--lumi) 14%, transparent) !important;
+}
+
+/* ---------- Barras, caixas de marcar, interruptores ---------- */
+.prog i, .bar i, .timer-bar i, .bar2 i, #notch-vol b, #lvl-bar { background: var(--grad) !important; border-radius: 99px; }
+.timer-bar.hot i, .meter .prog i.bad { background: linear-gradient(90deg, #ff8a8a, #ff5c7a) !important; }
+.meter .prog i.warn { background: linear-gradient(90deg, #ffd27a, #ffb454) !important; }
+li.done .cb, li.done .check-box, li.done > .check-box, .sub-li.done .check-box, .subs li.done .check-box {
+  background: var(--grad) !important; border-color: transparent !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--lumi) 18%, transparent);
+}
+.cb, .check-box { border-radius: 8px !important; transition: background .15s, transform .15s var(--ease); }
+.cb:active, .check-box:active { transform: scale(.85); }
+.tg input:checked + span { background: var(--grad) !important; }
+.dots i.on, .dots i.now { background: var(--grad) !important; }
+input[type=range] { accent-color: var(--lumi2); }
+
+/* ---------- Conversa ---------- */
+.msg { border-radius: 20px !important; }
+.msg.me { background: var(--grad) !important; color: var(--ink) !important; box-shadow: 0 8px 20px -10px color-mix(in srgb, var(--lumi2) 60%, transparent); }
+.msg.bot { background: var(--glass-2) !important; border: 1px solid var(--line); }
+
+/* ---------- Central: barra lateral ---------- */
+#side {
+  background: rgba(10, 12, 22, 0.35) !important;
+  -webkit-backdrop-filter: blur(22px); backdrop-filter: blur(22px);
+  border-right: 1px solid var(--line) !important;
+}
+#nav button, .side-foot button { border-radius: 14px !important; transition: background .15s, color .15s, transform .12s var(--ease); }
+#nav button:hover, .side-foot button:hover { background: var(--glass) !important; }
+#nav button.active, .side-foot button.active {
+  background: var(--grad-soft) !important; color: var(--text) !important;
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lumi) 30%, transparent) !important;
+}
+#nav button.active .ico { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--lumi) 70%, transparent)); }
+.badge { background: var(--grad-soft) !important; color: var(--text) !important; }
+
+/* ---------- Central: destaque do início ---------- */
+body.aurora-bg .hero {
+  position: relative; overflow: hidden;
+  background:
+    radial-gradient(70% 120% at 0% 0%, color-mix(in srgb, var(--lumi) 22%, transparent), transparent 60%),
+    radial-gradient(60% 120% at 100% 100%, color-mix(in srgb, var(--lumi2) 18%, transparent), transparent 60%),
+    var(--glass) !important;
+  border-radius: 28px !important;
+}
+body.aurora-bg .hero::after {
+  content: ''; position: absolute; inset: 0; pointer-events: none; border-radius: inherit;
+  background: radial-gradient(40% 60% at 85% 0%, color-mix(in srgb, var(--lumi3) 12%, transparent), transparent 70%);
+}
+.lvl-card { background: rgba(0, 0, 0, .2) !important; border-radius: 20px !important; }
+
+/* A Lumi ganha um halo que "respira" */
+.face-xl, .face-xxl, #lumi-big, .face, .face-big, .face-ring { position: relative; isolation: isolate; }
+.face-xl::before, .face-xxl::before, #lumi-big::before, .face-big::before {
+  content: ''; position: absolute; inset: -14%; border-radius: 50%; z-index: -1;
+  background: radial-gradient(circle, color-mix(in srgb, var(--lumi) 35%, transparent), color-mix(in srgb, var(--lumi2) 12%, transparent) 55%, transparent 70%);
+  animation: lumi-halo 4.5s ease-in-out infinite;
+}
+@keyframes lumi-halo { 0%, 100% { transform: scale(.94); opacity: .75; } 50% { transform: scale(1.06); opacity: 1; } }
+
+/* Player */
+.pl-ctrl button { background: var(--glass-2) !important; transition: transform .12s var(--ease), background .15s; }
+.pl-ctrl button:hover { background: rgba(255,255,255,.14) !important; }
+.pl-ctrl button.main, .ctl.main { background: var(--grad) !important; color: var(--ink) !important; box-shadow: 0 10px 24px -8px color-mix(in srgb, var(--lumi2) 60%, transparent); }
+.pl-ctrl button:active, .ctl:active { transform: scale(.92); }
+.mini-player img, .player-big img, .art { border-radius: 16px !important; }
+.art { background: var(--grad) !important; color: var(--ink); }
+
+/* Dicas e avisos */
+.tips div { background: var(--grad-soft) !important; border: 1px solid color-mix(in srgb, var(--lumi) 25%, transparent) !important; border-radius: 16px !important; }
+#toast {
+  background: rgba(22, 25, 40, 0.88) !important; border: 1px solid var(--line) !important;
+  -webkit-backdrop-filter: blur(16px); backdrop-filter: blur(16px);
+  border-radius: 999px !important;
+  box-shadow: 0 16px 40px -10px rgba(0, 0, 0, .6), 0 0 0 1px color-mix(in srgb, var(--lumi) 12%, transparent) !important;
+}
+
+/* Entrada suave das páginas */
+.page.active > *, .view.active > * { animation: lumi-rise .38s var(--ease) both; }
+.page.active > *:nth-child(2), .view.active > *:nth-child(2) { animation-delay: .04s; }
+.page.active > *:nth-child(3), .view.active > *:nth-child(3) { animation-delay: .08s; }
+.page.active > *:nth-child(4), .view.active > *:nth-child(4) { animation-delay: .12s; }
+.page.active > *:nth-child(n+5), .view.active > *:nth-child(n+5) { animation-delay: .16s; }
+@keyframes lumi-rise { from { opacity: 0; transform: translateY(8px); } }
+
+/* Barras de rolagem discretas */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, .09); border-radius: 10px; border: 3px solid transparent; background-clip: padding-box; }
+::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, var(--lumi) 35%, transparent); }
+::-webkit-scrollbar-track { background: transparent; }
+
+/* ---------- Entalho e painel do entalho ---------- */
+#notch {
+  background: linear-gradient(180deg, #000 0%, #05060c 100%) !important;
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4), inset 0 -1px 0 color-mix(in srgb, var(--lumi) 25%, transparent) !important;
+}
+#panel {
+  background:
+    radial-gradient(70% 40% at 10% 0%, color-mix(in srgb, var(--lumi) 14%, transparent), transparent 70%),
+    radial-gradient(60% 40% at 100% 10%, color-mix(in srgb, var(--lumi2) 12%, transparent), transparent 70%),
+    rgba(10, 12, 22, 0.94) !important;
+  border-radius: 0 0 30px 30px !important;
+}
+#tabs button { border-radius: 999px; transition: background .15s, color .15s; }
+#panel #tabs button.active, #panel .tab.active { background: var(--grad-soft) !important; color: var(--text) !important; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lumi) 30%, transparent); }
+
+/* ---------- Widgets ---------- */
+.w {
+  background:
+    radial-gradient(80% 60% at 0% 0%, color-mix(in srgb, var(--lumi) 13%, transparent), transparent 70%),
+    rgba(10, 12, 22, 0.78) !important;
+  border-radius: 24px !important;
+  box-shadow: var(--hl), 0 18px 40px -16px rgba(0, 0, 0, .55);
+}
+.w li { background: var(--glass) !important; border-radius: 12px !important; }
+.cal .today { background: var(--grad) !important; color: var(--ink) !important; }
+
+/* Quem prefere menos movimento */
+@media (prefers-reduced-motion: reduce) {
+  .page.active > *, .view.active > *, .face-xl::before, .face-xxl::before, #lumi-big::before, .face-big::before { animation: none !important; }
+}
+body.no-anim .page.active > *, body.no-anim .face-xl::before, body.no-anim .face-xxl::before, body.no-anim #lumi-big::before { animation: none !important; }
+
+/* ---------- App do celular ---------- */
+body.aurora-bg #app #tabs, body.aurora-bg #app #ask {
+  background: rgba(9, 11, 20, 0.72) !important;
+  -webkit-backdrop-filter: blur(22px) saturate(1.3); backdrop-filter: blur(22px) saturate(1.3);
+}
+body.aurora-bg #app #tabs button.active span { filter: drop-shadow(0 0 8px color-mix(in srgb, var(--lumi) 80%, transparent)) !important; }
+body.aurora-bg #app #tabs button.active { color: var(--text) !important; }
+body.aurora-bg #app .bubble { background: var(--grad-soft) !important; border: 1px solid color-mix(in srgb, var(--lumi) 22%, transparent) !important; border-radius: 18px 18px 18px 6px !important; }
+body.aurora-bg #app .seg { background: var(--glass) !important; }
+body.aurora-bg #app .seg button.active { background: var(--grad-soft) !important; color: var(--text) !important; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--lumi) 30%, transparent); }
+body.aurora-bg #app .ring { background: conic-gradient(from 0deg, var(--lumi), var(--lumi2) calc(var(--p) * 1%), rgba(255,255,255,.07) 0) !important; }
+body.aurora-bg #app .ring > div { background: var(--ink) !important; }
+body.aurora-bg #app .icon-btn { background: var(--glass) !important; border-radius: 14px !important; }
+@supports (font-family: ui-rounded) { body.aurora-bg { font-family: ui-rounded, system-ui, -apple-system, sans-serif; } }
