@@ -1,4 +1,5 @@
-// Lumi no celular: lê e grava as mesmas tarefas, lembretes, hábitos e notas do PC (via Supabase).
+// Lumi no celular: lê e grava as mesmas tarefas, lembretes, hábitos e notas do PC (via Supabase)
+// e controla o PC de longe (música, volume, rotinas e pedidos), com o PC ligado.
 import { createClient } from 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/+esm';
 
 const SUPABASE_URL = 'https://hdzvvpuzqqidznssgwmk.supabase.co';
@@ -12,17 +13,26 @@ const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 
 const todayKey = () => new Date().toLocaleDateString('sv-SE');
 const fmtClock = (ms) => new Date(ms).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
 const fmtLeft = (ms) => { const s = Math.max(0, Math.round(ms / 1000)); const h = Math.floor(s / 3600), m = Math.floor((s % 3600) / 60); return (h ? h + ':' + String(m).padStart(2, '0') : m) + ':' + String(s % 60).padStart(2, '0'); };
-const fmtWhen = (ms) => {
+const fmtDay = (ms) => {
   const d = new Date(ms), t = new Date(), tm = new Date(); tm.setDate(t.getDate() + 1);
-  const day = d.toDateString() === t.toDateString() ? 'hoje' : d.toDateString() === tm.toDateString() ? 'amanhã' : d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
-  return `${day} às ${fmtClock(ms)}`;
+  return d.toDateString() === t.toDateString() ? 'hoje' : d.toDateString() === tm.toDateString() ? 'amanhã' : d.toLocaleDateString('pt-BR', { weekday: 'short', day: '2-digit', month: '2-digit' });
 };
-function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2200); }
+const fmtWhen = (ms) => `${fmtDay(ms)} às ${fmtClock(ms)}`;
+const ago = (ms) => { const m = Math.round((Date.now() - ms) / 60e3); return m < 1 ? 'agora' : m < 60 ? `há ${m} min` : m < 1440 ? `há ${Math.round(m / 60)} h` : fmtWhen(ms); };
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.t); toast.t = setTimeout(() => t.classList.remove('show'), 2400); }
+
+// ---------- Vibração ----------
+const HAPTIC_KEY = 'lumi-haptic';
+let hapticOn = true;
+try { hapticOn = localStorage.getItem(HAPTIC_KEY) !== '0'; } catch {}
+const buzz = (p = 12) => { if (hapticOn && navigator.vibrate) try { navigator.vibrate(p); } catch {} };
+document.addEventListener('click', (e) => { if (e.target.closest('button')) buzz(); }, true);
 
 // ---------- Dados (cache local das linhas de lumi_items) ----------
 const db = { task: new Map(), reminder: new Map(), note: new Map(), habit: new Map(), snippet: new Map(), timer: new Map(), doc: new Map() };
 const list = (kind) => [...db[kind].values()];
 const docv = (id) => db.doc.get(id) ?? null;
+const strip = (o) => { const { id, ...rest } = o; return rest; };
 let user = null;
 
 function applyRow(row) {
@@ -32,7 +42,7 @@ function applyRow(row) {
   else m.set(row.id, { ...row.data, id: row.id });
 }
 async function loadAll() {
-  const { data, error } = await sb.from('lumi_items').select('kind,id,data,deleted').eq('deleted', false);
+  const { data, error } = await sb.from('lumi_items').select('kind,id,data,deleted').eq('deleted', false).neq('kind', 'cmd');
   if (error) throw error;
   Object.values(db).forEach((m) => m.clear());
   (data ?? []).forEach(applyRow);
@@ -56,18 +66,21 @@ function subscribe() {
   if (channel) sb.removeChannel(channel);
   channel = sb.channel('lumi-items')
     .on('postgres_changes', { event: '*', schema: 'public', table: 'lumi_items', filter: `user_id=eq.${user.id}` }, (p) => {
-      if (p.new && p.new.kind) { applyRow(p.new); renderAll(); }
+      const row = p.new;
+      if (!row || !row.kind) return;
+      if (row.kind === 'cmd') return onCommandDone(row);
+      applyRow(row); renderAll();
     })
     .subscribe();
 }
 
 // ---------- Personagem ----------
 const settings = () => docv('settings') ?? {};
-function say(text, mood = 'happy') {
+function say(text, mood = 'feliz') {
   $('#bubble').textContent = text;
   if ($('#speak-toggle').checked && 'speechSynthesis' in window) {
     const u = new SpeechSynthesisUtterance(text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, ''));
-    u.lang = 'pt-BR'; u.pitch = 1.5; u.rate = 1.08;
+    u.lang = 'pt-BR'; u.pitch = 1.4; u.rate = 1.08;
     const v = speechSynthesis.getVoices().find((x) => /pt-BR/i.test(x.lang));
     if (v) u.voice = v;
     u.onstart = () => LumiFace.mood('talking');
@@ -83,13 +96,98 @@ function applyLook() {
   if (key !== lookKey) { lookKey = key; LumiFace.setLook({ eyes: s.eyes || 'oval', acc: s.accessory || 'nenhum' }); }
 }
 
+// ---------- Nível e XP (o mesmo do PC) ----------
+function levelOf(points) {
+  let level = 1, need = 50, acc = 0;
+  while (points >= acc + need) { acc += need; level++; need = Math.round(need * 1.25); }
+  return { level, points, inLevel: points - acc, need, pct: Math.round(((points - acc) / need) * 100) };
+}
+function addXp(points) {
+  const before = levelOf((docv('xp') || {}).points || 0);
+  const now = Math.max(0, before.points + points);
+  put('doc', 'xp', { points: now });
+  const after = levelOf(now);
+  if (after.level > before.level) { buzz([30, 60, 30, 60, 80]); setTimeout(() => say(`Subi para o nível ${after.level}! 🎉`, 'conseguiu'), 400); }
+}
+function renderLevel() {
+  const l = levelOf((docv('xp') || {}).points || 0);
+  $('#lvl-n').textContent = `Nível ${l.level}`;
+  $('#lvl-bar').style.width = l.pct + '%';
+  $('#lvl-pts').textContent = `${l.inLevel}/${l.need} XP`;
+}
+
 // ---------- Abas ----------
 function showTab(name) {
   $$('#tabs button').forEach((b) => b.classList.toggle('active', b.dataset.tab === name));
   $$('.view').forEach((v) => v.classList.toggle('active', v.dataset.view === name));
+  $('#ask').hidden = !(name === 'home' || name === 'chat');
   $('#views').scrollTop = 0;
 }
 $('#tabs').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) showTab(b.dataset.tab); });
+document.addEventListener('click', (e) => { const g = e.target.closest('[data-goto]'); if (g) showTab(g.dataset.goto); });
+
+// ---------- Controle do PC ----------
+const sentCmds = new Map();
+const pcOnline = () => { const p = docv('pc'); return Boolean(p && Date.now() - (p.at || 0) < 11 * 60e3); };
+async function sendCmd(data, label) {
+  const id = uid();
+  sentCmds.set(id, label || 'Pedido');
+  const { error } = await sb.from('lumi_items').upsert({ kind: 'cmd', id, data: { ...data, at: Date.now(), from: 'celular' }, deleted: false }, { onConflict: 'user_id,kind,id' });
+  if (error) return toast('Não enviei: ' + error.message);
+  toast(pcOnline() ? `${label || 'Pedido'} enviado ao PC` : 'Enviado. O PC parece desligado: ele faz se ligar nos próximos 10 min.');
+  setTimeout(() => { if (sentCmds.has(id)) { sentCmds.delete(id); toast('O PC não respondeu. Ele está ligado?'); } }, 25e3);
+}
+function onCommandDone(row) {
+  if (!row.data?.done || !sentCmds.has(row.id)) return;
+  sentCmds.delete(row.id);
+  const r = String(row.data.result || 'feito');
+  if (/^erro/i.test(r)) toast('PC: ' + r);
+  else if (row.data.text) say(`O PC recebeu: "${row.data.text}" ✅`, 'conseguiu');
+  else toast('PC: ' + r + ' ✅');
+}
+$('#pc-player').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-op]'); if (!b) return;
+  const op = b.dataset.op;
+  if (op === 'vol-up' || op === 'vol-down') return sendCmd({ action: 'volume', delta: op === 'vol-up' ? 10 : -10 }, 'Volume');
+  if (op === 'mute') return sendCmd({ action: 'volume', mute: true }, 'Mudo');
+  if (op === 'ask') { showTab('chat'); $('#ask-input').focus(); $('#ask-input').placeholder = 'Ex.: toca Jorge e Mateus no PC'; return; }
+  sendCmd({ action: 'music', op }, op === 'toggle' ? 'Play/pausa' : op === 'next' ? 'Próxima' : 'Anterior');
+});
+$('#routine-chips').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-routine]'); if (!b) return;
+  const r = (settings().routines || []).find((x) => x.id === b.dataset.routine);
+  if (r) sendCmd({ action: 'routine', id: r.id }, `Rotina "${r.name}"`);
+});
+$('#pc-ask').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const t = $('#pc-ask-input').value.trim(); if (!t) return;
+  $('#pc-ask-input').value = '';
+  sendCmd({ text: t }, 'Pedido');
+});
+
+function renderPlayer() {
+  const np = docv('nowPlaying');
+  const online = pcOnline();
+  const status = `<span class="small muted"><span class="dot ${online ? 'on' : ''}"></span>PC ${online ? 'ligado' : 'desligado'}</span>`;
+  const has = np && np.has;
+  const vol = np && np.volume != null ? np.volume : null;
+  $('#pc-player').innerHTML = `
+    <div class="card-h"><span>${has ? (np.playing ? 'Tocando no PC' : 'Pausado no PC') : 'Música no PC'}</span>${status}</div>
+    <div class="player"><div class="art">${has ? '♪' : '♫'}</div>
+      <div class="np"><b>${has ? esc(np.title || 'Sem título') : 'Nada tocando'}</b><div>${has ? esc(np.artist || np.app || '') : 'Peça uma música para a Lumi'}</div></div></div>
+    <div class="ctls">
+      <button class="ctl" data-op="prev" aria-label="Anterior">⏮</button>
+      <button class="ctl main" data-op="toggle" aria-label="Tocar ou pausar">${has && np.playing ? '⏸' : '▶'}</button>
+      <button class="ctl" data-op="next" aria-label="Próxima">⏭</button>
+      <button class="ctl" data-op="ask" aria-label="Pedir música">🔎</button>
+    </div>
+    <div class="vol"><button class="ctl" data-op="vol-down" style="flex:none;width:42px">−</button><span>🔊</span><span class="bar"><i style="width:${vol ?? 0}%"></i></span><span>${vol != null ? vol + '%' : '—'}</span><button class="ctl" data-op="vol-up" style="flex:none;width:42px">+</button></div>`;
+}
+function renderRoutines() {
+  const rs = settings().routines || [];
+  $('#routines-card').hidden = !rs.length;
+  $('#routine-chips').innerHTML = rs.map((r) => `<button data-routine="${esc(r.id)}">▶ ${esc(r.name)}</button>`).join('');
+}
 
 // ---------- Conversa ----------
 const history = [];
@@ -101,6 +199,17 @@ function addMsg(kind, text) {
   $('#views').scrollTop = 1e9;
   return d;
 }
+async function callFn(name, body) {
+  const { data: { session } } = await sb.auth.getSession();
+  const r = await fetch(`${SUPABASE_URL}/functions/v1/${name}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, apikey: SUPABASE_KEY },
+    body: JSON.stringify(body),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || `erro ${r.status}`);
+  return j;
+}
 let busy = false;
 async function ask(text) {
   text = text.trim();
@@ -111,24 +220,18 @@ async function ask(text) {
   const typing = addMsg('bot typing', '…');
   LumiFace.mood('thinking');
   try {
-    const { data: { session } } = await sb.auth.getSession();
-    const r = await fetch(`${SUPABASE_URL}/functions/v1/lumi-chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, apikey: SUPABASE_KEY },
-      body: JSON.stringify({ text, history: history.slice(-12) }),
-    });
-    const j = await r.json();
-    if (!r.ok) throw new Error(j.error || 'erro');
+    const j = await callFn('lumi-chat', { text, history: history.slice(-12) });
     typing.remove();
     addMsg('bot', j.text);
     history.push({ role: 'user', text }, { role: 'assistant', text: j.text });
-    if (j.copy) { try { await navigator.clipboard.writeText(j.copy); toast('Copiado! 📋'); } catch { toast('Toque em Notas → Textos rápidos para copiar'); } }
+    if (j.copy) { try { await navigator.clipboard.writeText(j.copy); toast('Copiado! 📋'); } catch { toast('Toque em Mais → Textos para copiar'); } }
     say(j.text, j.mood || 'feliz');
+    buzz([10, 40, 10]);
     if (j.changed?.length) loadAll();
   } catch (e) {
     typing.remove();
     addMsg('bot', 'Ops: ' + e.message);
-    say('Algo deu errado. 😕', 'sad');
+    say('Algo deu errado. 😕', 'triste');
   } finally { busy = false; }
 }
 $('#ask').addEventListener('submit', (e) => { e.preventDefault(); const v = $('#ask-input').value; $('#ask-input').value = ''; ask(v); });
@@ -154,29 +257,96 @@ $('#mic').addEventListener('click', () => {
   rec.start();
 });
 
-// ---------- Água ----------
+// ---------- Água e hábitos ----------
 async function water(delta) {
   let w = docv('water');
   if (!w || w.date !== todayKey()) w = { date: todayKey(), count: 0 };
-  w = { ...w, count: Math.max(0, w.count + delta) };
-  delete w.id;
+  w = { ...strip(w), count: Math.max(0, w.count + delta) };
   await put('doc', 'water', w);
   const goal = settings().waterGoal || 8;
-  if (delta > 0) say(w.count >= goal ? 'Meta de água batida! 💧🎉' : `Mais um copo! ${w.count}/${goal} 💧`, w.count >= goal ? 'proud' : 'happy');
+  if (delta > 0) {
+    addXp(w.count === goal ? 12 : 2);
+    say(w.count >= goal ? 'Meta de água batida! 💧🎉' : `Mais um copo! ${w.count}/${goal} 💧`, w.count >= goal ? 'conseguiu' : 'feliz');
+  }
 }
-$('#water-btn').addEventListener('click', () => water(1));
+$('#habit-grid').addEventListener('click', async (e) => {
+  const card = e.target.closest('[data-habit]'); if (!card || e.target.tagName !== 'BUTTON') return;
+  const delta = e.target.dataset.d === '+' ? 1 : -1;
+  if (card.dataset.habit === 'agua') return water(delta);
+  const log = strip({ ...(docv('habitLog') ?? {}) });
+  const day = { ...(log[todayKey()] || {}) };
+  day[card.dataset.habit] = Math.max(0, (day[card.dataset.habit] || 0) + delta);
+  log[todayKey()] = day;
+  await put('doc', 'habitLog', log);
+  const h = db.habit.get(card.dataset.habit);
+  if (delta > 0 && h && day[h.id] === h.goal) { addXp(15); say(`${h.icon} ${h.name}: meta cumprida! 🎉`, 'conseguiu'); }
+});
+function renderHabits() {
+  const w = docv('water'); const wc = w && w.date === todayKey() ? w.count : 0;
+  const goal = settings().waterGoal || 8;
+  const log = (docv('habitLog') ?? {})[todayKey()] || {};
+  const card = (id, icon, name, c, g, unit) => `<div class="habit ${c >= g ? 'done' : ''}" data-habit="${esc(id)}"><div class="habit-top">${icon} ${esc(name)}</div><div><b>${c}</b>/${g} <span class="muted small">${esc(unit)}</span></div><div class="timer-bar"><i style="width:${Math.min(100, 100 * c / (g || 1))}%"></i></div><div class="btns"><button data-d="-">−</button><button data-d="+">+</button></div></div>`;
+  $('#habit-grid').innerHTML = card('agua', '💧', 'Água', wc, goal, 'copos') + list('habit').map((h) => card(h.id, h.icon || '⭐', h.name, log[h.id] || 0, h.goal || 1, h.unit || '')).join('');
+}
+
+// ---------- Início ----------
+function renderStats() {
+  const pend = list('task').filter((t) => !t.done).length;
+  const w = docv('water'); const wc = w && w.date === todayKey() ? w.count : 0;
+  const goal = settings().waterGoal || 8;
+  const endDay = new Date(); endDay.setHours(23, 59, 59, 999);
+  const remToday = list('reminder').filter((r) => !r.fired && r.at <= endDay.getTime()).length;
+  const f = docv('focus');
+  const stat = (ico, val, label, go) => `<button class="stat" data-goto="${go}"><span class="ico">${ico}</span><b>${val}</b><span>${label}</span></button>`;
+  $('#stats').innerHTML =
+    stat('✓', pend, pend === 1 ? 'tarefa pendente' : 'tarefas pendentes', 'tasks') +
+    stat('💧', `${wc}/${goal}`, 'copos de água', 'home') +
+    stat('⏰', remToday, remToday === 1 ? 'lembrete hoje' : 'lembretes hoje', 'tasks') +
+    stat('◔', f && f.phase ? fmtLeft(f.endsAt - Date.now()) : '—', f && f.phase ? PHASE[f.phase] : 'foco parado', 'focus');
+}
+let events = [];
+async function loadEvents() {
+  try { const j = await callFn('lumi-gcal', { action: 'events', days: 3 }); events = Array.isArray(j) ? j : []; } catch { events = []; }
+  renderNext();
+}
+function renderNext() {
+  const now = Date.now();
+  const items = [
+    ...list('reminder').filter((r) => !r.fired && r.at > now - 60e3).map((r) => ({ at: r.at, icon: r.alarm ? '🔔' : '⏰', text: r.text })),
+    ...list('task').filter((t) => !t.done && t.due).map((t) => ({ at: new Date(t.due).getTime(), icon: '✓', text: t.text })),
+    ...events.map((e) => ({ at: new Date(e.start).getTime(), icon: '📅', text: e.title, allDay: e.allDay })).filter((e) => e.at > now - 3600e3 || e.allDay),
+  ].filter((x) => Number.isFinite(x.at)).sort((a, b) => a.at - b.at).slice(0, 6);
+  $('#next-list').innerHTML = items.length
+    ? items.map((x) => `<li><span>${x.icon}</span><span class="grow">${esc(x.text)}</span><span class="when">${x.allDay ? fmtDay(x.at) : fmtWhen(x.at)}</span></li>`).join('')
+    : '<li class="empty">Nada marcado. Dia livre! 🌿</li>';
+}
+const WMO = (c) => (c === 0 ? ['☀️', 'céu limpo'] : c <= 2 ? ['🌤', 'poucas nuvens'] : c === 3 ? ['☁️', 'nublado'] : c <= 48 ? ['🌫', 'neblina'] : c <= 57 ? ['🌦', 'garoa'] : c <= 67 ? ['🌧', 'chuva'] : c <= 77 ? ['❄️', 'neve'] : c <= 82 ? ['🌦', 'pancadas'] : ['⛈', 'tempestade']);
+async function loadWeather() {
+  const s = settings();
+  if (s.lat == null) { $('#weather').innerHTML = '<span class="muted">Defina sua cidade na Central da Lumi (PC).</span>'; return; }
+  try {
+    const j = await (await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${s.lat}&longitude=${s.lon}&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,precipitation_probability_max&timezone=auto&forecast_days=1`)).json();
+    const [ico, txt] = WMO(j.current.weather_code);
+    $('#weather').innerHTML = `<div class="wx"><b>${ico} ${Math.round(j.current.temperature_2m)}°</b><div class="muted">${txt}<br>${Math.round(j.daily.temperature_2m_min[0])}° / ${Math.round(j.daily.temperature_2m_max[0])}° · 💧${j.daily.precipitation_probability_max[0]}%<br>${esc(s.city || '')}</div></div>`;
+  } catch { $('#weather').innerHTML = '<span class="muted">Sem conexão.</span>'; }
+}
+async function loadQuotes() {
+  try {
+    const j = await (await fetch('https://economia.awesomeapi.com.br/json/last/USD-BRL,EUR-BRL,BTC-BRL')).json();
+    const row = (k, n, dec) => { const q = j[k]; if (!q) return ''; const p = Number(q.pctChange); return `<div class="q"><span>${n}</span><span>R$ ${Number(q.bid).toLocaleString('pt-BR', { minimumFractionDigits: dec, maximumFractionDigits: dec })} <span class="${p >= 0 ? 'up' : 'down'}">${p >= 0 ? '▲' : '▼'}</span></span></div>`; };
+    $('#quotes').innerHTML = row('USDBRL', 'Dólar', 2) + row('EURBRL', 'Euro', 2) + row('BTCBRL', 'Bitcoin', 0);
+  } catch { $('#quotes').innerHTML = '<span class="muted">Sem conexão.</span>'; }
+}
 
 // ---------- Tarefas ----------
 const PRIO = ['', '🔵', '🟡', '🔴'];
 const expanded = new Set();
-const strip = (o) => { const { id, ...rest } = o; return rest; };
 $('#task-form').addEventListener('submit', (e) => {
   e.preventDefault();
   const text = $('#task-input').value.trim();
   if (!text) return;
   $('#task-input').value = '';
-  const t = { text, done: false, createdAt: Date.now(), priority: 0, subtasks: [], due: null };
-  put('task', uid(), t);
+  put('task', uid(), { text, done: false, createdAt: Date.now(), priority: 0, subtasks: [], due: null });
 });
 $('#task-list').addEventListener('click', (e) => {
   const li = e.target.closest('li[data-id]'); if (!li) return;
@@ -189,9 +359,12 @@ $('#task-list').addEventListener('click', (e) => {
     return;
   }
   if (e.target.closest('.sub-form')) return;
-  if (e.target.classList.contains('x')) return del('task', t.id);
+  if (e.target.classList.contains('x') && !e.target.classList.contains('prio')) return del('task', t.id);
   if (e.target.classList.contains('prio')) return put('task', t.id, { ...strip(t), priority: ((t.priority || 0) + 1) % 4 });
-  if (e.target.classList.contains('check-box')) { if (!t.done) say('Mandou bem! ✅', 'proud'); return put('task', t.id, { ...strip(t), done: !t.done }); }
+  if (e.target.classList.contains('check-box')) {
+    if (!t.done) { buzz([15, 50, 25]); addXp(10); say('Mandou bem! ✅ +10 XP', 'conseguiu'); }
+    return put('task', t.id, { ...strip(t), done: !t.done });
+  }
   expanded.has(t.id) ? expanded.delete(t.id) : expanded.add(t.id); renderTasks();
 });
 $('#task-list').addEventListener('submit', (e) => {
@@ -206,12 +379,12 @@ function renderTasks() {
   $('#task-list').innerHTML = tasks.length ? tasks.map((t) => {
     const subs = t.subtasks || [];
     const open = expanded.has(t.id);
-    return `<li data-id="${t.id}" class="task ${t.done ? 'done' : ''}">
-      <div class="task-row"><button class="check-box" style="${t.done ? 'background:var(--lumi);border-color:var(--lumi)' : ''}"></button>
-      <span class="grow">${esc(t.text)}${subs.length ? ` <span class="muted">· ${subs.filter((s) => s.done).length}/${subs.length}</span>` : ''}</span>
-      <button class="x prio">${PRIO[t.priority || 0] || '⚑'}</button><button class="x">✕</button></div>
-      ${open ? `<ul class="subs">${subs.map((s) => `<li class="sub-li ${s.done ? 'done' : ''}" data-sub="${s.id}"><button class="check-box"></button><span class="grow">${esc(s.text)}</span><button class="x">✕</button></li>`).join('')}</ul>
-      <form class="sub-form row" data-task="${t.id}" style="margin:6px 0 0 34px"><input placeholder="Subtarefa…" /><button class="chip">+</button></form>` : ''}
+    return `<li data-id="${esc(t.id)}" class="task ${t.done ? 'done' : ''}">
+      <div class="task-row"><button class="check-box" aria-label="Concluir"></button>
+      <span class="grow">${esc(t.text)}${subs.length ? ` <span class="muted small">· ${subs.filter((s) => s.done).length}/${subs.length}</span>` : ''}</span>
+      <button class="x prio" aria-label="Prioridade">${PRIO[t.priority || 0] || '⚑'}</button><button class="x" aria-label="Apagar">✕</button></div>
+      ${open ? `<ul class="subs">${subs.map((s) => `<li class="sub-li ${s.done ? 'done' : ''}" data-sub="${esc(s.id)}"><button class="check-box"></button><span class="grow">${esc(s.text)}</span><button class="x">✕</button></li>`).join('')}</ul>
+      <form class="sub-form row" data-task="${esc(t.id)}" style="margin:6px 0 0 34px"><input placeholder="Subtarefa…" /><button class="btn ghost">+</button></form>` : ''}
     </li>`;
   }).join('') : '<li class="empty">Nenhuma tarefa. Que paz! 🌿</li>';
 }
@@ -232,66 +405,54 @@ $('#rem-form').addEventListener('submit', (e) => {
   if (at <= Date.now() && $('#rem-repeat').value === 'none') return toast('Esse horário já passou');
   put('reminder', uid(), { text, at, fired: false, preFired: false, repeat: $('#rem-repeat').value, advanceMin: Number($('#rem-advance').value), alarm: $('#rem-alarm').checked });
   $('#rem-text').value = ''; $('#rem-at').value = defaultAt();
-  say('Lembrete agendado! ⏰', 'proud');
+  say('Lembrete agendado! ⏰', 'conseguiu');
 });
 $('#rem-list').addEventListener('click', (e) => { const li = e.target.closest('li[data-id]'); if (li && e.target.classList.contains('x')) del('reminder', li.dataset.id); });
 function renderReminders() {
   const rem = list('reminder').filter((r) => !r.fired).sort((a, b) => a.at - b.at);
-  $('#rem-list').innerHTML = rem.length ? rem.map((r) => `<li data-id="${r.id}">${r.alarm ? '🔔' : '⏰'}<span class="grow">${esc(r.text)}<br><span class="muted">${fmtWhen(r.at)}${r.repeat !== 'none' ? ' · ' + REP[r.repeat] : ''}${r.advanceMin ? ` · aviso ${r.advanceMin} min antes` : ''}</span></span><button class="x">✕</button></li>`).join('')
+  $('#rem-list').innerHTML = rem.length ? rem.map((r) => `<li data-id="${esc(r.id)}">${r.alarm ? '🔔' : '⏰'}<span class="grow">${esc(r.text)}<br><span class="muted small">${fmtWhen(r.at)}${r.repeat && r.repeat !== 'none' ? ' · ' + REP[r.repeat] : ''}${r.advanceMin ? ` · aviso ${r.advanceMin} min antes` : ''}</span></span><button class="x">✕</button></li>`).join('')
     : '<li class="empty">Sem lembretes agendados.</li>';
 }
 
 // ---------- Foco ----------
 const PHASE = { focus: '🎯 Foco', short: '☕ Pausa', long: '🌴 Pausa longa' };
-$('#pomo-start').addEventListener('click', () => { const min = settings().focusMin || 25; put('doc', 'focus', { phase: 'focus', cycle: 1, endsAt: Date.now() + min * 60e3, durationMs: min * 60e3 }); say('Foco ligado! 🍅', 'cool'); });
+$('#pomo-start').addEventListener('click', () => { const min = settings().focusMin || 25; put('doc', 'focus', { phase: 'focus', cycle: 1, endsAt: Date.now() + min * 60e3, durationMs: min * 60e3 }); say('Foco ligado! 🍅', 'descolada'); });
 $('#pomo-stop').addEventListener('click', () => put('doc', 'focus', null));
 $('#timer-presets').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
   const ms = Number(b.dataset.min) * 60e3;
-  put('timer', uid(), { label: b.dataset.label || `${b.dataset.min} min`, endsAt: Date.now() + ms, durationMs: ms });
+  put('timer', uid(), { label: b.dataset.label || b.textContent.trim(), endsAt: Date.now() + ms, durationMs: ms });
+  toast(`Timer de ${b.textContent.trim()} ligado`);
 });
 $('#timer-list').addEventListener('click', (e) => { const li = e.target.closest('li[data-id]'); if (li && e.target.classList.contains('x')) del('timer', li.dataset.id); });
 function renderFocus() {
   const f = docv('focus');
   const live = f && f.phase;
-  $('#pomo-phase').textContent = live ? PHASE[f.phase] : 'parado';
-  $('#pomo-phase').className = 'pill ' + (live ? 'ok' : '');
-  $('#pomo-time').textContent = live ? fmtLeft(f.pausedLeft != null ? f.pausedLeft : f.endsAt - Date.now()) : fmtLeft((settings().focusMin || 25) * 60e3);
+  const left = live ? (f.pausedLeft != null ? f.pausedLeft : f.endsAt - Date.now()) : (settings().focusMin || 25) * 60e3;
+  $('#pomo-phase').textContent = live ? `${PHASE[f.phase]} · ciclo ${f.cycle || 1}` : 'parado';
+  $('#pomo-time').textContent = fmtLeft(left);
+  $('#pomo-ring').style.setProperty('--p', live && f.durationMs ? Math.min(100, 100 * (1 - left / f.durationMs)) : 0);
   $('#pomo-start').hidden = Boolean(live); $('#pomo-stop').hidden = !live;
   const now = Date.now();
   const timers = list('timer').filter((t) => t.endsAt > now - 60e3).sort((a, b) => a.endsAt - b.endsAt);
-  $('#timer-list').innerHTML = timers.length ? timers.map((t) => `<li data-id="${t.id}"><span class="grow"><b>${esc(t.label)}</b><div class="timer-bar"><i style="width:${Math.min(100, 100 * (1 - (t.endsAt - now) / t.durationMs))}%"></i></div></span><span class="ttime">${fmtLeft(t.endsAt - now)}</span><button class="x">✕</button></li>`).join('') : '<li class="empty">Nenhum timer rodando.</li>';
+  $('#timer-list').innerHTML = timers.length ? timers.map((t) => `<li data-id="${esc(t.id)}"><span class="grow"><b>${esc(t.label)}</b><div class="timer-bar"><i style="width:${Math.min(100, 100 * (1 - (t.endsAt - now) / t.durationMs))}%"></i></div></span><span class="ttime">${fmtLeft(t.endsAt - now)}</span><button class="x">✕</button></li>`).join('') : '<li class="empty">Nenhum timer rodando.</li>';
 }
 
-// ---------- Hábitos e PC ----------
-$('#habit-grid').addEventListener('click', async (e) => {
-  const card = e.target.closest('[data-habit]'); if (!card || e.target.tagName !== 'BUTTON') return;
-  const delta = e.target.dataset.d === '+' ? 1 : -1;
-  if (card.dataset.habit === 'agua') return water(delta);
-  const log = { ...(docv('habitLog') ?? {}) }; delete log.id;
-  const day = { ...(log[todayKey()] || {}) };
-  day[card.dataset.habit] = Math.max(0, (day[card.dataset.habit] || 0) + delta);
-  log[todayKey()] = day;
-  await put('doc', 'habitLog', log);
-  const h = db.habit.get(card.dataset.habit);
-  if (delta > 0 && h && day[h.id] === h.goal) say(`${h.icon} ${h.name}: meta cumprida! 🎉`, 'proud');
-});
-function renderHabits() {
-  const w = docv('water'); const wc = w && w.date === todayKey() ? w.count : 0;
-  const goal = settings().waterGoal || 8;
-  $('#water-count').textContent = wc; $('#water-goal').textContent = goal;
-  const log = (docv('habitLog') ?? {})[todayKey()] || {};
-  const card = (id, icon, name, c, g, unit) => `<div class="habit ${c >= g ? 'done' : ''}" data-habit="${id}"><div class="habit-top">${icon} ${esc(name)}</div><div><b>${c}</b>/${g} <span class="muted">${esc(unit)}</span></div><div class="timer-bar"><i style="width:${Math.min(100, 100 * c / g)}%"></i></div><div class="btns"><button data-d="-">−</button><button data-d="+">+</button></div></div>`;
-  $('#habit-grid').innerHTML = card('agua', '💧', 'Água', wc, goal, 'copos') + list('habit').map((h) => card(h.id, h.icon, h.name, log[h.id] || 0, h.goal, h.unit)).join('');
+// ---------- PC e sistemas ----------
+function renderPc() {
   const p = docv('pc');
   const bar = (n, v, t) => `<div class="pc-line"><span>${n}</span><div class="timer-bar ${v >= 90 ? 'hot' : ''}"><i style="width:${v}%"></i></div><b>${t}</b></div>`;
-  $('#pc-card').innerHTML = p ? bar('Processador', p.cpu, p.cpu + '%') + bar('Memória', p.mem, p.mem + '%') + (p.disk ? bar('Disco', p.disk.usedPct, p.disk.freeGB + ' GB livres') : '') + `<div class="muted">Visto ${fmtWhen(p.at)}</div>` : '<span class="muted">O PC ainda não enviou o estado.</span>';
+  $('#pc-card').innerHTML = `<div class="card-h"><span>Seu PC</span><span class="small muted"><span class="dot ${pcOnline() ? 'on' : ''}"></span>${p ? 'visto ' + ago(p.at) : 'sem dados'}</span></div>` +
+    (p ? bar('Processador', p.cpu, p.cpu + '%') + bar('Memória', p.mem, p.mem + '%') + (p.disk ? bar('Disco', p.disk.usedPct, p.disk.freeGB + ' GB livres') : '') : '<span class="muted small">O PC ainda não enviou o estado.</span>');
+  const s = docv('systems');
+  $('#systems').innerHTML = !s || !s.sistemas ? '<div class="muted small">O PC envia o resumo dos sistemas quando estiver ligado.</div>'
+    : `<p class="muted small">Atualizado ${ago(s.at)}</p>` + s.sistemas.map((x) => `<div class="sys"><h5>${esc(x.icon || '🗂')} ${esc(x.projeto)}</h5>${x.tabelas.map((t) => `<div class="l"><span>${esc(t.nome)}</span><span><b>${t.total == null ? '—' : t.total.toLocaleString('pt-BR')}</b>${t.novosHoje ? `<span class="new">+${t.novosHoje} hoje</span>` : ''}</span></div>`).join('')}</div>`).join('');
 }
 
 // ---------- Notas e textos rápidos ----------
-$('#notes-seg').addEventListener('click', (e) => {
+$('#more-seg').addEventListener('click', (e) => {
   const b = e.target.closest('button'); if (!b) return;
-  $$('#notes-seg button').forEach((x) => x.classList.toggle('active', x === b));
+  $$('#more-seg button').forEach((x) => x.classList.toggle('active', x === b));
   $$('.sub').forEach((v) => v.classList.toggle('active', v.dataset.subView === b.dataset.sub));
 });
 $('#note-form').addEventListener('submit', (e) => { e.preventDefault(); const t = $('#note-input').value.trim(); if (!t) return; $('#note-input').value = ''; put('note', uid(), { text: t, createdAt: Date.now() }); });
@@ -312,22 +473,26 @@ $('#snip-list').addEventListener('click', async (e) => {
 });
 function renderNotes() {
   const notes = list('note').sort((a, b) => b.createdAt - a.createdAt);
-  $('#note-list').innerHTML = notes.length ? notes.map((n) => `<li data-id="${n.id}"><span class="grow">${esc(n.text)}</span><button class="x">✕</button></li>`).join('') : '<li class="empty">Nenhuma nota.</li>';
+  $('#note-list').innerHTML = notes.length ? notes.map((n) => `<li data-id="${esc(n.id)}"><span class="grow">${esc(n.text)}</span><button class="x">✕</button></li>`).join('') : '<li class="empty">Nenhuma nota.</li>';
   const snips = list('snippet');
-  $('#snip-list').innerHTML = snips.length ? snips.map((s) => `<li data-id="${s.id}"><span class="snip-name">${esc(s.name)}</span><span class="grow">${esc(s.text)}</span><button class="x">✕</button></li>`).join('') : '<li class="empty">Salve seu pix, endereço, e-mail…</li>';
-}
-
-// ---------- Sistemas ----------
-function renderSystems() {
-  const s = docv('systems');
-  if (!s || !s.sistemas) { $('#systems').innerHTML = '<div class="muted">O PC envia o resumo dos sistemas quando estiver ligado com o token do Supabase configurado.</div>'; return; }
-  $('#systems').innerHTML = `<p class="muted">Atualizado ${fmtWhen(s.at)}</p>` + s.sistemas.map((p) => `<div class="sys"><h5>${esc(p.icon || '🗂')} ${esc(p.projeto)}</h5>${p.tabelas.map((t) => `<div class="l"><span>${esc(t.nome)}</span><span><b>${t.total == null ? '—' : t.total.toLocaleString('pt-BR')}</b>${t.novosHoje ? `<span class="new">+${t.novosHoje} hoje</span>` : ''}</span></div>`).join('')}</div>`).join('');
+  $('#snip-list').innerHTML = snips.length ? snips.map((s) => `<li data-id="${esc(s.id)}"><span class="snip-name">${esc(s.name)}</span><span class="grow">${esc(s.text)}</span><button class="x">✕</button></li>`).join('') : '<li class="empty">Salve seu pix, endereço, e-mail…</li>';
 }
 
 function renderAll() {
   applyLook();
-  renderTasks(); renderReminders(); renderFocus(); renderHabits(); renderNotes(); renderSystems();
+  renderLevel(); renderStats(); renderPlayer(); renderRoutines(); renderNext(); renderHabits();
+  renderTasks(); renderReminders(); renderFocus(); renderNotes(); renderPc();
 }
+
+// ---------- Atualizar ----------
+async function refresh(manual) {
+  if (!user) return;
+  if (manual) $('#refresh').classList.add('spin');
+  try { await loadAll(); await Promise.all([loadWeather(), loadQuotes(), loadEvents()]); if (manual) toast('Atualizado ✨'); }
+  catch (e) { if (manual) toast('Não atualizou: ' + e.message); }
+  finally { $('#refresh').classList.remove('spin'); }
+}
+$('#refresh').addEventListener('click', () => refresh(true));
 
 // ---------- Notificações (Web Push) ----------
 const b64ToBytes = (b) => { const p = '='.repeat((4 - (b.length % 4)) % 4); const raw = atob((b + p).replace(/-/g, '+').replace(/_/g, '/')); return Uint8Array.from(raw, (c) => c.charCodeAt(0)); };
@@ -346,14 +511,12 @@ async function enablePush() {
   const { error: e2 } = await sb.from('lumi_push_subs').upsert({ endpoint: j.endpoint, p256dh: j.keys.p256dh, auth: j.keys.auth, device: navigator.userAgent.slice(0, 120) }, { onConflict: 'endpoint' });
   if (e2) { $('#push-status').textContent = 'Erro: ' + e2.message; return; }
   $('#push-status').textContent = '✅ Notificações ativas neste celular.';
-  say('Pronto! Vou te avisar por aqui. 🔔', 'proud');
+  say('Pronto! Vou te avisar por aqui. 🔔', 'conseguiu');
 }
 $('#push-btn').addEventListener('click', () => enablePush().catch((e) => { $('#push-status').textContent = 'Erro: ' + e.message; }));
 $('#push-test').addEventListener('click', async () => {
-  const { data: { session } } = await sb.auth.getSession();
-  const r = await fetch(`${SUPABASE_URL}/functions/v1/lumi-push`, { method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${session.access_token}`, apikey: SUPABASE_KEY }, body: JSON.stringify({ action: 'test' }) });
-  const j = await r.json().catch(() => ({}));
-  toast(r.ok ? (j.sent ? 'Enviada! 🔔' : 'Ative as notificações primeiro') : 'Erro: ' + (j.error || r.status));
+  try { const j = await callFn('lumi-push', { action: 'test' }); toast(j.sent ? 'Enviada! 🔔' : 'Ative as notificações primeiro'); }
+  catch (e) { toast('Erro: ' + e.message); }
 });
 async function pushStatus() {
   if (!('serviceWorker' in navigator) || !('PushManager' in window)) return;
@@ -375,6 +538,8 @@ $('#cal-copy').addEventListener('click', async () => { try { await navigator.cli
 const SPEAK_KEY = 'lumi-speak';
 try { $('#speak-toggle').checked = localStorage.getItem(SPEAK_KEY) === '1'; } catch {}
 $('#speak-toggle').addEventListener('change', () => { try { localStorage.setItem(SPEAK_KEY, $('#speak-toggle').checked ? '1' : '0'); } catch {} });
+$('#haptic-toggle').checked = hapticOn;
+$('#haptic-toggle').addEventListener('change', () => { hapticOn = $('#haptic-toggle').checked; try { localStorage.setItem(HAPTIC_KEY, hapticOn ? '1' : '0'); } catch {} buzz(20); });
 $('#logout').addEventListener('click', async () => { await sb.auth.signOut(); location.reload(); });
 
 // Login por código no e-mail (o mesmo do MailDesk)
@@ -405,6 +570,11 @@ $('#resend-btn').addEventListener('click', sendCode);
 LumiFace.create($('#lumi-login'));
 LumiFace.create($('#lumi-face'));
 
+function greet() {
+  const h = new Date().getHours();
+  const name = settings().userName ? `, ${settings().userName}` : '';
+  return `${h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'}${name}!`;
+}
 async function start(session) {
   if (!session) { $('#login').hidden = false; $('#app').hidden = true; return; }
   user = session.user;
@@ -412,9 +582,10 @@ async function start(session) {
   $('#account').textContent = `Conectada como ${user.email}`;
   await loadAll();
   subscribe();
-  const h = new Date().getHours();
-  const name = settings().userName ? `, ${settings().userName}` : '';
-  say(`${h < 12 ? 'Bom dia' : h < 18 ? 'Boa tarde' : 'Boa noite'}${name}! ✨`, 'happy');
+  $('#greet').textContent = greet();
+  const pend = list('task').filter((t) => !t.done).length;
+  say(pend ? `Você tem ${pend} ${pend === 1 ? 'tarefa pendente' : 'tarefas pendentes'}. Bora? ✨` : 'Tudo em dia por aqui! ✨', 'feliz');
+  loadWeather(); loadQuotes(); loadEvents();
   pushStatus();
 }
 let started = false;
@@ -424,11 +595,16 @@ sb.auth.onAuthStateChange((event, session) => {
 });
 sb.auth.getSession().then(({ data }) => { if (!started) { started = Boolean(data.session); start(data.session); } });
 
+let lastMinute = -1;
 setInterval(() => {
-  $('#hero-date').textContent = new Date().toLocaleDateString('pt-BR', { weekday: 'short', day: 'numeric', month: 'short' }) + ' · ' + fmtClock(Date.now());
-  if (user) renderFocus();
+  if (!user) return;
+  renderFocus();
+  const m = new Date().getMinutes();
+  if (m !== lastMinute) { lastMinute = m; $('#greet').textContent = greet(); renderStats(); renderPlayer(); }
+  else if (docv('focus')?.phase) renderStats();
 }, 1000);
-document.addEventListener('visibilitychange', () => { if (!document.hidden && user) loadAll(); });
+setInterval(() => { if (user && !document.hidden) { loadWeather(); loadQuotes(); loadEvents(); } }, 15 * 60e3);
+document.addEventListener('visibilitychange', () => { if (!document.hidden && user) refresh(false); });
 
 const standalone = matchMedia('(display-mode: standalone)').matches || navigator.standalone;
 if (!standalone) $('#install-hint').textContent = /iPhone|iPad/.test(navigator.userAgent) ? 'Dica: Compartilhar → Adicionar à Tela de Início para usar como app.' : 'Dica: menu ⋮ → Instalar app / Adicionar à tela inicial.';
