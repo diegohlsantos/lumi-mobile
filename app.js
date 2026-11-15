@@ -76,17 +76,53 @@ function subscribe() {
 
 // ---------- Personagem ----------
 const settings = () => docv('settings') ?? {};
-function say(text, mood = 'feliz') {
+let speakNext = false; // a próxima resposta sai falada (pergunta feita por voz)
+function say(text, mood = 'feliz', { speak } = {}) {
   $('#bubble').textContent = text;
-  if ($('#speak-toggle').checked && 'speechSynthesis' in window) {
-    const u = new SpeechSynthesisUtterance(text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, ''));
-    u.lang = 'pt-BR'; u.pitch = 1.4; u.rate = 1.08;
+  if (speak ?? $('#speak-toggle').checked) speakText(text, mood);
+  else LumiFace.mood(mood, 2500);
+}
+
+// ---------- Áudio (voz do Gemini, a mesma do PC) ----------
+let ac = null;
+/** O iPhone só deixa tocar som depois de um toque: destrava o áudio no primeiro toque. */
+function unlockAudio() {
+  try {
+    if (!ac) ac = new (window.AudioContext || window.webkitAudioContext)();
+    if (ac.state !== 'running') ac.resume();
+    const b = ac.createBuffer(1, 1, 22050), src = ac.createBufferSource();
+    src.buffer = b; src.connect(ac.destination); src.start(0);
+  } catch {}
+}
+document.addEventListener('touchend', unlockAudio, { passive: true });
+document.addEventListener('click', unlockAudio);
+let playing = null;
+function stopSpeaking() { try { playing && playing.stop(); } catch {} playing = null; try { speechSynthesis.cancel(); } catch {} }
+const b64ToBuf = (b) => Uint8Array.from(atob(b), (c) => c.charCodeAt(0)).buffer;
+async function speakText(text, mood) {
+  stopSpeaking();
+  const clean = text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '').trim();
+  if (!clean) return LumiFace.mood(mood, 2500);
+  try {
+    const j = await callFn('lumi-voice', { action: 'tts', text: clean });
+    if (!j.audio) throw new Error('sem áudio');
+    unlockAudio();
+    const buf = await ac.decodeAudioData(b64ToBuf(j.audio));
+    const src = ac.createBufferSource();
+    src.buffer = buf; src.connect(ac.destination);
+    src.onended = () => { if (playing === src) { playing = null; LumiFace.mood(mood, 1800); } };
+    playing = src; LumiFace.mood('talking'); src.start(0);
+  } catch {
+    // Reserva: voz do próprio celular
+    if (!('speechSynthesis' in window)) return LumiFace.mood(mood, 2500);
+    const u = new SpeechSynthesisUtterance(clean);
+    u.lang = 'pt-BR'; u.rate = 1.05;
     const v = speechSynthesis.getVoices().find((x) => /pt-BR/i.test(x.lang));
     if (v) u.voice = v;
     u.onstart = () => LumiFace.mood('talking');
     u.onend = () => LumiFace.mood(mood, 1800);
-    speechSynthesis.cancel(); speechSynthesis.speak(u);
-  } else LumiFace.mood(mood, 2500);
+    speechSynthesis.speak(u);
+  }
 }
 let lookKey = '';
 function applyLook() {
@@ -225,7 +261,8 @@ async function ask(text) {
     addMsg('bot', j.text);
     history.push({ role: 'user', text }, { role: 'assistant', text: j.text });
     if (j.copy) { try { await navigator.clipboard.writeText(j.copy); toast('Copiado! 📋'); } catch { toast('Toque em Mais → Textos para copiar'); } }
-    say(j.text, j.mood || 'feliz');
+    say(j.text, j.mood || 'feliz', speakNext ? { speak: true } : {});
+    speakNext = false;
     buzz([10, 40, 10]);
     if (j.changed?.length) loadAll();
   } catch (e) {
@@ -234,27 +271,104 @@ async function ask(text) {
     say('Algo deu errado. 😕', 'triste');
   } finally { busy = false; }
 }
-$('#ask').addEventListener('submit', (e) => { e.preventDefault(); const v = $('#ask-input').value; $('#ask-input').value = ''; ask(v); });
+$('#ask').addEventListener('submit', (e) => { e.preventDefault(); unlockAudio(); const v = $('#ask-input').value; $('#ask-input').value = ''; ask(v); });
 $('#suggestions').addEventListener('click', (e) => { if (e.target.tagName === 'BUTTON') ask(e.target.textContent); });
 
-// Voz pelo microfone do celular (Chrome no Android e Safari no iPhone)
+// Voz pelo microfone: grava aqui e transcreve no Gemini (bem mais confiável que o ditado do navegador).
+// Para sozinho quando você para de falar; toque de novo para parar antes.
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let rec = null;
-$('#mic').addEventListener('click', () => {
-  if (!SR) return toast('Use o microfone do teclado para ditar 🎙');
-  if (rec) { rec.stop(); return; }
-  rec = new SR();
-  rec.lang = 'pt-BR'; rec.interimResults = true; rec.maxAlternatives = 1;
-  let final = '';
-  $('#mic').classList.add('on'); LumiFace.mood('listening'); $('#bubble').textContent = 'Pode falar! 👂';
-  rec.onresult = (e) => {
-    let interim = '';
-    for (const r of e.results) (r.isFinal ? (final = r[0].transcript) : (interim += r[0].transcript));
-    $('#bubble').textContent = (final || interim) + '…';
+function wavBase64(chunks, rate) {
+  const total = chunks.reduce((n, c) => n + c.length, 0);
+  const ratio = rate / 16000, len = Math.floor(total / ratio);
+  const all = new Float32Array(total); let o = 0; for (const c of chunks) { all.set(c, o); o += c.length; }
+  const view = new DataView(new ArrayBuffer(44 + len * 2));
+  const w = (p, str) => { for (let i = 0; i < str.length; i++) view.setUint8(p + i, str.charCodeAt(i)); };
+  w(0, 'RIFF'); view.setUint32(4, 36 + len * 2, true); w(8, 'WAVE'); w(12, 'fmt '); view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true); view.setUint16(22, 1, true); view.setUint32(24, 16000, true); view.setUint32(28, 32000, true);
+  view.setUint16(32, 2, true); view.setUint16(34, 16, true); w(36, 'data'); view.setUint32(40, len * 2, true);
+  for (let i = 0; i < len; i++) {
+    // média simples ao reduzir a taxa (evita chiado)
+    const a = Math.floor(i * ratio), b = Math.min(total, Math.floor((i + 1) * ratio)); let sum = 0;
+    for (let k = a; k < b; k++) sum += all[k];
+    const v = Math.max(-1, Math.min(1, sum / Math.max(1, b - a)));
+    view.setInt16(44 + i * 2, v < 0 ? v * 0x8000 : v * 0x7fff, true);
+  }
+  const bytes = new Uint8Array(view.buffer); let bin = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(bin);
+}
+async function listen() {
+  stopSpeaking();
+  unlockAudio();
+  let stream;
+  try { stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true } }); }
+  catch { return toast('Permita o microfone para a Lumi nas configurações do celular 🎙'); }
+  if (ac.state !== 'running') await ac.resume().catch(() => {});
+  const src = ac.createMediaStreamSource(stream);
+  const proc = ac.createScriptProcessor(4096, 1, 1);
+  const mute = ac.createGain(); mute.gain.value = 0;
+  src.connect(proc); proc.connect(mute); mute.connect(ac.destination);
+  const chunks = [], rate = ac.sampleRate, t0 = Date.now();
+  let floor = 0, n = 0, spoke = false, lastVoice = 0, done = false;
+  const finish = (send) => {
+    if (done) return; done = true;
+    try { proc.disconnect(); src.disconnect(); mute.disconnect(); } catch {}
+    stream.getTracks().forEach((t) => t.stop());
+    $('#mic').classList.remove('on'); rec = null;
+    if (!send || !spoke) { LumiFace.mood('idle'); $('#bubble').textContent = 'Não ouvi nada. Toque no 🎙 e fale.'; return; }
+    transcribe(chunks, rate);
   };
-  rec.onend = () => { $('#mic').classList.remove('on'); rec = null; if (final) ask(final); else LumiFace.mood('idle'); };
-  rec.onerror = () => { $('#mic').classList.remove('on'); rec = null; };
-  rec.start();
+  rec = { stop: () => finish(true) };
+  proc.onaudioprocess = (e) => {
+    if (done) return;
+    const d = new Float32Array(e.inputBuffer.getChannelData(0));
+    chunks.push(d);
+    let sum = 0; for (let i = 0; i < d.length; i += 4) sum += d[i] * d[i];
+    const rms = Math.sqrt(sum / (d.length / 4)), now = Date.now();
+    if (n < 3) { floor = (floor * n + rms) / (n + 1); n++; return; } // mede o ruído do ambiente
+    const voice = rms > Math.max(0.012, floor * 2.5);
+    if (voice) { spoke = true; lastVoice = now; }
+    $('#bubble').textContent = spoke ? 'Ouvindo… 👂' + (voice ? ' 🔊' : '') : 'Pode falar! 👂';
+    if (spoke && now - lastVoice > 1300) finish(true);           // parou de falar
+    else if (!spoke && now - t0 > 7000) finish(false);           // ninguém falou
+    else if (now - t0 > 30000) finish(true);                     // limite de 30 s
+  };
+  $('#mic').classList.add('on'); LumiFace.mood('listening'); $('#bubble').textContent = 'Pode falar! 👂';
+  buzz(20);
+}
+async function transcribe(chunks, rate) {
+  LumiFace.mood('thinking'); $('#bubble').textContent = 'Entendendo… ✨';
+  try {
+    const j = await callFn('lumi-voice', { action: 'stt', audio: wavBase64(chunks, rate) });
+    const text = (j.text || '').trim();
+    if (!text) { LumiFace.mood('idle'); $('#bubble').textContent = 'Não entendi. Pode repetir? 🎙'; return; }
+    speakNext = true;
+    ask(text);
+  } catch (e) {
+    LumiFace.mood('triste', 2000);
+    $('#bubble').textContent = 'Não consegui ouvir: ' + e.message;
+  }
+}
+// Reserva: ditado do navegador (se a voz na nuvem não estiver pronta)
+function listenBrowser() {
+  if (!SR) return toast('Use o microfone do teclado para ditar 🎙');
+  const r = new SR();
+  r.lang = 'pt-BR'; r.interimResults = true; r.maxAlternatives = 1;
+  let final = '';
+  rec = r;
+  $('#mic').classList.add('on'); LumiFace.mood('listening'); $('#bubble').textContent = 'Pode falar! 👂';
+  r.onresult = (e) => { let interim = ''; for (const x of e.results) (x.isFinal ? (final = x[0].transcript) : (interim += x[0].transcript)); $('#bubble').textContent = (final || interim) + '…'; };
+  r.onend = () => { $('#mic').classList.remove('on'); rec = null; if (final) { speakNext = true; ask(final); } else LumiFace.mood('idle'); };
+  r.onerror = () => { $('#mic').classList.remove('on'); rec = null; };
+  r.start();
+}
+let cloudVoice = null; // null = ainda não sei; true/false depois de perguntar ao servidor
+async function checkCloudVoice() { try { cloudVoice = Boolean((await callFn('lumi-voice', { action: 'status' })).ready); } catch { cloudVoice = false; } }
+$('#mic').addEventListener('click', () => {
+  if (rec) { rec.stop(); return; }
+  const canRecord = navigator.mediaDevices?.getUserMedia && (window.AudioContext || window.webkitAudioContext);
+  if (cloudVoice !== false && canRecord) listen(); else listenBrowser();
 });
 
 // ---------- Água e hábitos ----------
@@ -536,7 +650,7 @@ $('#cal-copy').addEventListener('click', async () => { try { await navigator.cli
 
 // ---------- Conta ----------
 const SPEAK_KEY = 'lumi-speak';
-try { $('#speak-toggle').checked = localStorage.getItem(SPEAK_KEY) === '1'; } catch {}
+try { $('#speak-toggle').checked = localStorage.getItem(SPEAK_KEY) !== '0'; } catch { $('#speak-toggle').checked = true; }
 $('#speak-toggle').addEventListener('change', () => { try { localStorage.setItem(SPEAK_KEY, $('#speak-toggle').checked ? '1' : '0'); } catch {} });
 $('#haptic-toggle').checked = hapticOn;
 $('#haptic-toggle').addEventListener('change', () => { hapticOn = $('#haptic-toggle').checked; try { localStorage.setItem(HAPTIC_KEY, hapticOn ? '1' : '0'); } catch {} buzz(20); });
@@ -586,6 +700,7 @@ async function start(session) {
   const pend = list('task').filter((t) => !t.done).length;
   say(pend ? `Você tem ${pend} ${pend === 1 ? 'tarefa pendente' : 'tarefas pendentes'}. Bora? ✨` : 'Tudo em dia por aqui! ✨', 'feliz');
   loadWeather(); loadQuotes(); loadEvents();
+  checkCloudVoice();
   pushStatus();
 }
 let started = false;
