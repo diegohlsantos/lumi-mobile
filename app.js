@@ -92,27 +92,50 @@ function unlockAudio() {
     if (ac.state !== 'running') ac.resume();
     const b = ac.createBuffer(1, 1, 22050), src = ac.createBufferSource();
     src.buffer = b; src.connect(ac.destination); src.start(0);
+    // A voz do celular (reserva) também precisa ser destravada por um toque, uma vez.
+    if (!unlockAudio.tts && 'speechSynthesis' in window) { unlockAudio.tts = true; const u = new SpeechSynthesisUtterance(' '); u.volume = 0; speechSynthesis.speak(u); }
   } catch {}
 }
 document.addEventListener('touchend', unlockAudio, { passive: true });
 document.addEventListener('click', unlockAudio);
 let playing = null;
-function stopSpeaking() { try { playing && playing.stop(); } catch {} playing = null; try { speechSynthesis.cancel(); } catch {} }
+let speakSeq = 0;
+let ttsBlockedUntil = 0;
+function stopSpeaking() { speakSeq++; try { playing && playing.stop(); } catch {} playing = null; try { speechSynthesis.cancel(); } catch {} }
 const b64ToBuf = (b) => Uint8Array.from(atob(b), (c) => c.charCodeAt(0)).buffer;
 async function speakText(text, mood) {
   stopSpeaking();
   const clean = text.replace(/[\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}\u{FE0F}]/gu, '').trim();
   if (!clean) return LumiFace.mood(mood, 2500);
+  const seq = ++speakSeq;
   try {
-    const j = await callFn('lumi-voice', { action: 'tts', text: clean });
-    if (!j.audio) throw new Error('sem áudio');
-    unlockAudio();
-    const buf = await ac.decodeAudioData(b64ToBuf(j.audio));
-    const src = ac.createBufferSource();
-    src.buffer = buf; src.connect(ac.destination);
-    src.onended = () => { if (playing === src) { playing = null; LumiFace.mood(mood, 1800); } };
-    playing = src; LumiFace.mood('talking'); src.start(0);
-  } catch {
+    // A cota de voz do Gemini acabou há pouco: vai direto para a voz do celular (sem esperar o erro).
+    if (Date.now() < ttsBlockedUntil) throw new Error('cota');
+    // Respostas longas: a primeira frase vai sozinha para começar a falar antes; o resto é gerado junto.
+    const m = clean.length >= 140 && /^(.{20,160}?[.!?…])\s+(.+)$/s.exec(clean);
+    const parts = m ? [m[1], m[2]] : [clean];
+    const jobs = parts.map((p) => callFn('lumi-voice', { action: 'tts', text: p }));
+    jobs.forEach((j) => j.catch(() => {}));
+    for (let i = 0; i < jobs.length; i++) {
+      let j;
+      try { j = await jobs[i]; } catch (e) { if (i === 0) throw e; break; }
+      if (seq !== speakSeq) return;
+      if (!j.audio) { if (i === 0) throw new Error('sem áudio'); continue; }
+      unlockAudio();
+      const buf = await ac.decodeAudioData(b64ToBuf(j.audio));
+      if (seq !== speakSeq) return;
+      await new Promise((resolve) => {
+        const src = ac.createBufferSource();
+        src.buffer = buf; src.connect(ac.destination);
+        src.onended = () => { if (playing === src) playing = null; resolve(); };
+        playing = src; LumiFace.mood('talking'); src.start(0);
+      });
+      if (seq !== speakSeq) return;
+    }
+    LumiFace.mood(mood, 1800);
+  } catch (e) {
+    if (seq !== speakSeq) return;
+    if (e.status === 429) ttsBlockedUntil = Date.now() + 10 * 60e3;
     // Reserva: voz do próprio celular
     if (!('speechSynthesis' in window)) return LumiFace.mood(mood, 2500);
     const u = new SpeechSynthesisUtterance(clean);
@@ -243,7 +266,7 @@ async function callFn(name, body) {
     body: JSON.stringify(body),
   });
   const j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || `erro ${r.status}`);
+  if (!r.ok) { const e = new Error(j.error || `erro ${r.status}`); e.status = r.status; throw e; }
   return j;
 }
 let busy = false;
