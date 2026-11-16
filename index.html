@@ -12,8 +12,8 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="stylesheet" href="lumi-face.css" />
-  <link rel="stylesheet" href="styles.css?v=8" />
-  <link rel="stylesheet" href="aurora.css?v=8" />
+  <link rel="stylesheet" href="styles.css?v=9" />
+  <link rel="stylesheet" href="aurora.css?v=9" />
 </head>
 <body class="aurora-bg">
   <!-- Login -->
@@ -52,6 +52,11 @@
       <!-- Início -->
       <div data-view="home" class="view active">
         <div class="grid2" id="stats"></div>
+
+        <div class="card" id="alerts-card" hidden>
+          <div class="card-h"><span>🔔 Novidades</span><span class="muted small">dos seus sistemas</span></div>
+          <ul class="list tight" id="alert-list"></ul>
+        </div>
 
         <div class="card" id="pc-player"></div>
 
@@ -172,7 +177,7 @@
             <button id="logout" class="btn ghost">Sair</button>
           </div>
           <p class="muted small center" id="install-hint"></p>
-          <p class="muted small center">Lumi no celular · versão 8</p>
+          <p class="muted small center">Lumi no celular · versão 9</p>
         </div>
       </div>
     </main>
@@ -194,6 +199,6 @@
 
   <div id="toast"></div>
   <script src="lumi.js"></script>
-  <script type="module" src="app.js?v=8"></script>
+  <script type="module" src="app.js?v=9"></script>
 </body>
 </html>

@@ -29,8 +29,9 @@ const buzz = (p = 12) => { if (hapticOn && navigator.vibrate) try { navigator.vi
 document.addEventListener('click', (e) => { if (e.target.closest('button')) buzz(); }, true);
 
 // ---------- Dados (cache local das linhas de lumi_items) ----------
-const db = { task: new Map(), reminder: new Map(), note: new Map(), habit: new Map(), snippet: new Map(), timer: new Map(), doc: new Map() };
+const db = { task: new Map(), reminder: new Map(), note: new Map(), habit: new Map(), snippet: new Map(), timer: new Map(), doc: new Map(), alert: new Map() };
 const list = (kind) => [...db[kind].values()];
+const list_ = list;
 const docv = (id) => db.doc.get(id) ?? null;
 const strip = (o) => { const { id, ...rest } = o; return rest; };
 let user = null;
@@ -615,8 +616,16 @@ function renderNotes() {
   $('#snip-list').innerHTML = snips.length ? snips.map((s) => `<li data-id="${esc(s.id)}"><span class="snip-name">${esc(s.name)}</span><span class="grow">${esc(s.text)}</span><button class="x">✕</button></li>`).join('') : '<li class="empty">Salve seu pix, endereço, e-mail…</li>';
 }
 
+// Avisos que o PC manda (novidades dos sistemas, resumo do dia, impressões, reuniões)
+function renderAlerts() {
+  const list = list_('alert').sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 8);
+  $('#alerts-card').hidden = !list.length;
+  $('#alert-list').innerHTML = list.map((a) => `<li><span>${esc(a.icon || '🔔')}</span><span class="grow"><b style="font-weight:600">${esc(a.title)}</b>${a.body ? `<br><span class="muted small">${esc(String(a.body).split('
+')[0].slice(0, 140))}</span>` : ''}</span><span class="when">${ago(a.at || 0)}</span></li>`).join('');
+}
 function renderAll() {
   applyLook();
+  renderAlerts();
   renderLevel(); renderStats(); renderPlayer(); renderRoutines(); renderNext(); renderHabits();
   renderTasks(); renderReminders(); renderFocus(); renderNotes(); renderPc();
 }
