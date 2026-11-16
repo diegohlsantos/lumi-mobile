@@ -12,8 +12,8 @@
   <link rel="icon" href="icons/icon-192.png" />
   <link rel="apple-touch-icon" href="icons/apple-touch-icon.png" />
   <link rel="stylesheet" href="lumi-face.css" />
-  <link rel="stylesheet" href="styles.css?v=9" />
-  <link rel="stylesheet" href="aurora.css?v=9" />
+  <link rel="stylesheet" href="styles.css?v=10" />
+  <link rel="stylesheet" href="aurora.css?v=10" />
 </head>
 <body class="aurora-bg">
   <!-- Login -->
@@ -58,6 +58,21 @@
           <ul class="list tight" id="alert-list"></ul>
         </div>
 
+        <div class="card" id="pend-card" hidden>
+          <div class="card-h"><span>📌 Pendências agora</span><span class="muted small" id="pend-when"></span></div>
+          <div id="pend-list"></div>
+        </div>
+
+        <div class="card" id="wait-card" hidden>
+          <div class="card-h"><span>💬 Esperando sua resposta</span><span class="muted small">WhatsApp e Instagram</span></div>
+          <ul class="list tight" id="wait-list"></ul>
+        </div>
+
+        <div class="card" id="props-card" hidden>
+          <div class="card-h"><span>⭐ Propostas em aberto</span><button class="link" id="props-open">ver todas</button></div>
+          <ul class="list tight" id="props-mini"></ul>
+        </div>
+
         <div class="card" id="pc-player"></div>
 
         <div class="card" id="routines-card" hidden>
@@ -97,6 +112,16 @@
 
       <!-- Tarefas e lembretes -->
       <div data-view="tasks" class="view">
+        <div class="card form" id="req-card">
+          <div class="card-h"><span>👤 Pedidos de pessoas</span><span class="muted small">a Lumi lembra e cobra</span></div>
+          <form id="req-form" class="form-stack">
+            <div class="row"><input id="req-who" placeholder="Quem pediu (ex.: Rayane)" autocomplete="off" /></div>
+            <input id="req-what" placeholder="O que pediu…" autocomplete="off" />
+            <div class="row"><input id="req-due" type="datetime-local" /><button class="btn primary">Registrar</button></div>
+          </form>
+          <ul class="list tight" id="req-list"></ul>
+        </div>
+        <h4>Tarefas</h4>
         <form id="task-form" class="row">
           <input id="task-input" placeholder="Nova tarefa…" autocomplete="off" />
           <button class="btn primary sq">+</button>
@@ -131,7 +156,21 @@
 
       <!-- Mais -->
       <div data-view="more" class="view">
-        <div class="seg" id="more-seg"><button data-sub="notes" class="active">Notas</button><button data-sub="snippets">Textos</button><button data-sub="pc">PC</button><button data-sub="config">Ajustes</button></div>
+        <div class="seg" id="more-seg"><button data-sub="proposals">Propostas</button><button data-sub="notes" class="active">Notas</button><button data-sub="snippets">Textos</button><button data-sub="pc">PC</button><button data-sub="config">Ajustes</button></div>
+
+        <div data-sub-view="proposals" class="sub">
+          <div class="card form">
+            <div class="card-h"><span>⭐ Avaliar uma proposta</span></div>
+            <p class="muted small">Tire foto da proposta (papel, tela, cartaz) ou escolha prints/PDF. A Lumi dá nota, recomendação e contraproposta, e salva aqui e no PC.</p>
+            <input type="file" id="pr-file" accept="image/*,application/pdf" multiple hidden />
+            <div class="row"><button class="btn primary" id="pr-photo">📷 Tirar foto / escolher</button></div>
+            <div id="pr-thumbs" class="thumbs"></div>
+            <input id="pr-note" placeholder="Observações (opcional)" autocomplete="off" />
+            <button class="btn primary" id="pr-go" hidden>⭐ Avaliar</button>
+            <p class="muted small" id="pr-status"></p>
+          </div>
+          <div id="pr-list"></div>
+        </div>
 
         <div data-sub-view="notes" class="sub active">
           <form id="note-form" class="row"><input id="note-input" placeholder="Anotar…" autocomplete="off" /><button class="btn primary sq">+</button></form>
@@ -177,13 +216,28 @@
             <button id="logout" class="btn ghost">Sair</button>
           </div>
           <p class="muted small center" id="install-hint"></p>
-          <p class="muted small center">Lumi no celular · versão 9</p>
+          <p class="muted small center">Lumi no celular · versão 10</p>
         </div>
       </div>
     </main>
 
+    <div id="photo-strip" hidden>
+      <img id="ph-thumb" alt="" />
+      <div class="ph-side">
+        <div class="chips" id="ph-quick">
+          <button data-q="O que é isso? Me explique em poucas palavras.">🔎 O que é?</button>
+          <button data-q="Veja se alguém está me pedindo algo nesta imagem e registre como pedido (quem, o quê, prazo).">👤 Virar pedido</button>
+          <button data-q="Crie os lembretes certos para as datas e horários que aparecem nesta imagem.">📅 Lembretes</button>
+          <button data-proposal="1">⭐ Avaliar proposta</button>
+        </div>
+        <span class="muted small">ou escreva uma pergunta sobre a foto</span>
+      </div>
+      <button class="x" id="ph-x" aria-label="Tirar foto">✕</button>
+    </div>
     <form id="ask" autocomplete="off">
+      <input type="file" id="ph-file" accept="image/*" hidden />
       <button type="button" id="mic" class="icon-btn" title="Falar" aria-label="Falar">🎙</button>
+      <button type="button" id="ph-btn" class="icon-btn" title="Foto" aria-label="Mandar foto">📷</button>
       <input id="ask-input" placeholder="Fale com a Lumi…" />
       <button class="btn primary sq" id="ask-send" aria-label="Enviar">↑</button>
     </form>
@@ -199,6 +253,6 @@
 
   <div id="toast"></div>
   <script src="lumi.js"></script>
-  <script type="module" src="app.js?v=9"></script>
+  <script type="module" src="app.js?v=10"></script>
 </body>
 </html>

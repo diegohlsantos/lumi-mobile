@@ -1,5 +1,5 @@
 // Service worker da Lumi: notificações e funcionamento offline básico.
-const CACHE = 'lumi-v9';
+const CACHE = 'lumi-v10';
 const SHELL = ['./', 'index.html', 'styles.css', 'lumi-face.css', 'aurora.css', 'lumi.js', 'app.js', 'manifest.webmanifest', 'icons/icon-192.png'];
 
 self.addEventListener('install', (e) => {

@@ -29,7 +29,7 @@ const buzz = (p = 12) => { if (hapticOn && navigator.vibrate) try { navigator.vi
 document.addEventListener('click', (e) => { if (e.target.closest('button')) buzz(); }, true);
 
 // ---------- Dados (cache local das linhas de lumi_items) ----------
-const db = { task: new Map(), reminder: new Map(), note: new Map(), habit: new Map(), snippet: new Map(), timer: new Map(), doc: new Map(), alert: new Map() };
+const db = { task: new Map(), reminder: new Map(), note: new Map(), habit: new Map(), snippet: new Map(), timer: new Map(), doc: new Map(), alert: new Map(), proposal: new Map() };
 const list = (kind) => [...db[kind].values()];
 const list_ = list;
 const docv = (id) => db.doc.get(id) ?? null;
@@ -272,15 +272,18 @@ async function callFn(name, body) {
 }
 let busy = false;
 async function ask(text) {
-  text = text.trim();
-  if (!text || busy) return;
+  text = String(text || '').trim();
+  const photo = chatPhoto;
+  if ((!text && !photo) || busy) return;
+  if (!text) text = 'O que é isso?';
   busy = true;
   showTab('chat');
-  addMsg('me', text);
+  addMsg('me', (photo ? '📷 ' : '') + text);
+  if (photo) clearPhoto();
   const typing = addMsg('bot typing', '…');
   LumiFace.mood('thinking');
   try {
-    const j = await callFn('lumi-chat', { text, history: history.slice(-12) });
+    const j = await callFn('lumi-chat', { text, history: history.slice(-12), images: photo ? [{ mime: photo.mime, data: photo.data }] : undefined });
     typing.remove();
     addMsg('bot', j.text);
     history.push({ role: 'user', text }, { role: 'assistant', text: j.text });
@@ -295,7 +298,7 @@ async function ask(text) {
     say('Algo deu errado. 😕', 'triste');
   } finally { busy = false; }
 }
-$('#ask').addEventListener('submit', (e) => { e.preventDefault(); unlockAudio(); const v = $('#ask-input').value; $('#ask-input').value = ''; ask(v); });
+$('#ask').addEventListener('submit', (e) => { e.preventDefault(); unlockAudio(); const v = $('#ask-input').value; $('#ask-input').value = ''; if (v.trim() || chatPhoto) ask(v); });
 $('#suggestions').addEventListener('click', (e) => { if (e.target.tagName === 'BUTTON') ask(e.target.textContent); });
 
 // Voz pelo microfone: grava aqui e transcreve no Gemini (bem mais confiável que o ditado do navegador).
@@ -519,7 +522,7 @@ function renderTasks() {
     const open = expanded.has(t.id);
     return `<li data-id="${esc(t.id)}" class="task ${t.done ? 'done' : ''}">
       <div class="task-row"><button class="check-box" aria-label="Concluir"></button>
-      <span class="grow">${esc(t.text)}${subs.length ? ` <span class="muted small">· ${subs.filter((s) => s.done).length}/${subs.length}</span>` : ''}</span>
+      <span class="grow">${esc(t.text)}${subs.length ? ` <span class="muted small">· ${subs.filter((s) => s.done).length}/${subs.length}</span>` : ''}${t.from ? ` <span class="who">👤 ${esc(t.from)}</span>` : ''}${t.due && !t.done ? `<br><span class="muted small">até ${fmtWhen(new Date(t.due).getTime())}</span>` : ''}</span>
       <button class="x prio" aria-label="Prioridade">${PRIO[t.priority || 0] || '⚑'}</button><button class="x" aria-label="Apagar">✕</button></div>
       ${open ? `<ul class="subs">${subs.map((s) => `<li class="sub-li ${s.done ? 'done' : ''}" data-sub="${esc(s.id)}"><button class="check-box"></button><span class="grow">${esc(s.text)}</span><button class="x">✕</button></li>`).join('')}</ul>
       <form class="sub-form row" data-task="${esc(t.id)}" style="margin:6px 0 0 34px"><input placeholder="Subtarefa…" /><button class="btn ghost">+</button></form>` : ''}
@@ -620,12 +623,164 @@ function renderNotes() {
 function renderAlerts() {
   const list = list_('alert').sort((a, b) => (b.at || 0) - (a.at || 0)).slice(0, 8);
   $('#alerts-card').hidden = !list.length;
-  $('#alert-list').innerHTML = list.map((a) => `<li><span>${esc(a.icon || '🔔')}</span><span class="grow"><b style="font-weight:600">${esc(a.title)}</b>${a.body ? `<br><span class="muted small">${esc(String(a.body).split('
-')[0].slice(0, 140))}</span>` : ''}</span><span class="when">${ago(a.at || 0)}</span></li>`).join('');
+  $('#alert-list').innerHTML = list.map((a) => `<li><span>${esc(a.icon || '🔔')}</span><span class="grow"><b style="font-weight:600">${esc(a.title)}</b>${a.body ? `<br><span class="muted small">${esc(String(a.body).split(/\r?\n/)[0].slice(0, 140))}</span>` : ''}</span><span class="when">${ago(a.at || 0)}</span></li>`).join('');
 }
+
+// ---------- Fotos (câmera do celular) ----------
+/** Reduz a foto (máx. 1600 px, JPEG) para mandar rápido para a IA. */
+function shrinkImage(file, max = 1600) {
+  return new Promise((resolve, reject) => {
+    if (file.type === 'application/pdf') {
+      const r = new FileReader();
+      r.onload = () => resolve({ mime: 'application/pdf', data: String(r.result).split(',')[1], url: null, name: file.name });
+      r.onerror = reject; r.readAsDataURL(file); return;
+    }
+    const img = new Image();
+    const url = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const dataUrl = c.toDataURL('image/jpeg', 0.82);
+      URL.revokeObjectURL(url);
+      resolve({ mime: 'image/jpeg', data: dataUrl.split(',')[1], url: dataUrl, name: file.name });
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); reject(new Error('Não consegui abrir a imagem.')); };
+    img.src = url;
+  });
+}
+
+// Foto no chat: aparece em cima do campo, com atalhos
+let chatPhoto = null;
+$('#ph-btn').addEventListener('click', () => $('#ph-file').click());
+$('#ph-file').addEventListener('change', async (e) => {
+  const f = e.target.files[0]; e.target.value = '';
+  if (!f) return;
+  try {
+    chatPhoto = await shrinkImage(f);
+    $('#ph-thumb').src = chatPhoto.url;
+    $('#photo-strip').hidden = false;
+    $('#ask-input').placeholder = 'Pergunte algo sobre a foto…';
+    showTab('chat');
+  } catch (err) { toast(err.message); }
+});
+function clearPhoto() { chatPhoto = null; $('#photo-strip').hidden = true; $('#ask-input').placeholder = 'Fale com a Lumi…'; }
+$('#ph-x').addEventListener('click', clearPhoto);
+$('#ph-quick').addEventListener('click', async (e) => {
+  const b = e.target.closest('button'); if (!b || !chatPhoto) return;
+  if (b.dataset.proposal) { const ph = chatPhoto; clearPhoto(); return evaluateProposal([ph], ''); }
+  ask(b.dataset.q);
+});
+
+// ---------- Pedidos de pessoas ----------
+$('#req-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const from = $('#req-who').value.trim(), text = $('#req-what').value.trim();
+  if (!from || !text) return toast('Preencha quem pediu e o quê.');
+  const dueVal = $('#req-due').value;
+  const due = dueVal ? new Date(dueVal) : null;
+  await put('task', uid(), { text, done: false, createdAt: Date.now(), priority: 2, subtasks: [], due: due ? due.toISOString() : null, from });
+  if (due && due.getTime() > Date.now()) await put('reminder', uid(), { text: `${from} pediu: ${text}`, at: due.getTime(), fired: false, preFired: false, repeat: 'none', advanceMin: 60, alarm: false });
+  $('#req-what').value = ''; $('#req-due').value = '';
+  buzz([15, 40, 15]);
+  say(`Anotado: ${from} pediu "${text}"${due ? ' — te lembro no prazo' : ''}. 👤`, 'conseguiu');
+});
+$('#req-list').addEventListener('click', (e) => {
+  const li = e.target.closest('li[data-id]'); if (!li) return;
+  const t = db.task.get(li.dataset.id); if (!t) return;
+  if (e.target.classList.contains('check-box')) { buzz([15, 50, 25]); addXp(10); say('Pedido entregue! ✅ +10 XP', 'conseguiu'); put('task', t.id, { ...strip(t), done: true }); }
+});
+function renderRequests() {
+  const reqs = list('task').filter((t) => !t.done && t.from).sort((a, b) => (a.due ? new Date(a.due) : Infinity) - (b.due ? new Date(b.due) : Infinity));
+  $('#req-list').innerHTML = reqs.map((t) => {
+    const late = t.due && new Date(t.due).getTime() < Date.now();
+    return `<li data-id="${esc(t.id)}"><button class="check-box" aria-label="Feito"></button><span class="grow"><b>${esc(t.from)}</b> · ${esc(t.text)}${t.due ? `<br><span class="small ${late ? 'late' : 'muted'}">${late ? 'atrasado · ' : 'até '}${fmtWhen(new Date(t.due).getTime())}</span>` : ''}</span></li>`;
+  }).join('') || '<li class="empty">Ninguém te pediu nada pendente. 🌿</li>';
+}
+
+// ---------- Pendências e conversas (o PC manda) ----------
+function renderPend() {
+  const d = docv('pendencias');
+  const itens = (d && d.itens) || [];
+  $('#pend-card').hidden = !itens.length;
+  $('#pend-when').textContent = d && d.at ? ago(d.at) : '';
+  $('#pend-list').innerHTML = itens.map((p) => `<div class="pend-p"><b>${esc(p.icon)} ${esc(p.project)}</b>${p.items.map((i) => `<div class="pend-i"><span>${esc(i.label)}</span><strong>${i.n}</strong></div>`).join('')}</div>`).join('');
+}
+const waitTxt = (ms) => { const m = Math.round((Date.now() - ms) / 60e3); return m < 60 ? `${m} min` : m < 1440 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}` : `${Math.round(m / 1440)}d`; };
+function renderWait() {
+  const d = docv('inboxWaiting');
+  const itens = (d && d.itens) || [];
+  $('#wait-card').hidden = !itens.length;
+  $('#wait-list').innerHTML = itens.slice(0, 6).map((c) => `<li><span>${c.app === 'instagram' ? '📸' : '💬'}</span><span class="grow"><b>${esc(c.chat)}</b> <span class="tag ${c.label === 'pessoal' ? 'tag-p' : 'tag-c'}">${c.label === 'pessoal' ? '🏠 Pessoal' : '🏢 Corporativo'}</span><br><span class="muted small">${esc(c.preview || '')}</span></span><span class="when">${waitTxt(c.desde)}</span></li>`).join('');
+}
+
+// ---------- Propostas ----------
+const REC_CLASS = { patrocinar: 'rec-patrocinar', negociar: 'rec-negociar', recusar: 'rec-recusar', 'pedir mais informações': 'rec-pedir' };
+const PSTATUS = ['em análise', 'negociando', 'aprovada', 'recusada', 'arquivada'];
+let prFiles = [];
+$('#pr-photo').addEventListener('click', () => $('#pr-file').click());
+$('#pr-file').addEventListener('change', async (e) => {
+  const files = [...e.target.files].slice(0, 3); e.target.value = '';
+  for (const f of files) { try { prFiles.push(await shrinkImage(f)); } catch (err) { toast(err.message); } }
+  prFiles = prFiles.slice(0, 3);
+  $('#pr-thumbs').innerHTML = prFiles.map((f) => (f.url ? `<img src="${f.url}" alt="" />` : '<span class="pdf">📄 PDF</span>')).join('');
+  $('#pr-go').hidden = !prFiles.length;
+});
+$('#pr-go').addEventListener('click', () => { const files = prFiles; prFiles = []; $('#pr-thumbs').innerHTML = ''; $('#pr-go').hidden = true; evaluateProposal(files, $('#pr-note').value.trim()); $('#pr-note').value = ''; });
+async function evaluateProposal(files, note) {
+  showTab('more'); showSub('proposals');
+  $('#pr-status').textContent = 'Lendo e avaliando com calma… (uns 20–40 s) ⭐';
+  LumiFace.mood('thinking');
+  try {
+    const j = await callFn('lumi-chat', { mode: 'proposal', text: note, images: files.map((f) => ({ mime: f.mime, data: f.data })) });
+    const p = j.proposal;
+    applyRow({ kind: 'proposal', id: p.id, data: p, deleted: false });
+    renderAll();
+    $('#pr-status').textContent = '';
+    buzz([20, 60, 20]);
+    say(`${p.titulo}: nota ${p.nota}/10, recomendo ${p.recomendacao}. ${p.resumo}`, p.nota >= 7 ? 'conseguiu' : p.nota >= 5 ? 'pensando' : 'triste');
+  } catch (err) { $('#pr-status').textContent = 'Não deu: ' + err.message; LumiFace.mood('triste', 2000); }
+}
+const ulist = (arr) => (arr && arr.length ? `<ul>${arr.map((x) => `<li>${esc(x)}</li>`).join('')}</ul>` : '<p class="muted small">—</p>');
+function renderProposals() {
+  const all = list('proposal').sort((a, b) => (b.at || 0) - (a.at || 0));
+  const open = all.filter((p) => p.status === 'em análise' || p.status === 'negociando');
+  $('#props-card').hidden = !open.length;
+  $('#props-mini').innerHTML = open.slice(0, 3).map((p) => `<li><span class="score-mini ${p.nota >= 7 ? 's-hi' : p.nota >= 5 ? 's-mid' : 's-lo'}">${Number(p.nota).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}</span><span class="grow">${esc(p.titulo)}</span><span class="rec ${REC_CLASS[p.recomendacao] || ''}">${esc(p.recomendacao)}</span></li>`).join('');
+  if (document.activeElement && document.activeElement.closest && document.activeElement.closest('#pr-list')) return;
+  $('#pr-list').innerHTML = all.map((p) => {
+    const custo = p.valor_num && p.publico_num ? ` · R$ ${(p.valor_num / p.publico_num).toLocaleString('pt-BR', { maximumFractionDigits: 2 })}/pessoa` : '';
+    return `<div class="card pr" data-id="${esc(p.id)}">
+      <div class="pr-h"><span class="score-mini lg ${p.nota >= 7 ? 's-hi' : p.nota >= 5 ? 's-mid' : 's-lo'}">${Number(p.nota).toLocaleString('pt-BR', { maximumFractionDigits: 1 })}</span><b class="grow">${esc(p.titulo)}</b><span class="rec ${REC_CLASS[p.recomendacao] || ''}">${esc(p.recomendacao)}</span></div>
+      <div class="muted small">${[p.organizador, p.data_evento, p.local].filter(Boolean).map(esc).join(' · ')}${p.valor ? `<br>💰 ${esc(p.valor)}${custo}` : ''}</div>
+      <p class="pr-sum">${esc(p.resumo || '')}</p>
+      <details><summary class="muted small">Ver avaliação completa</summary>
+        <div class="pr-det"><h5>Aderência</h5><p>${esc(p.aderencia || '')}</p><h5>Contraproposta</h5><p>${esc(p.contraproposta || '')}</p>
+        <h5>Contrapartidas</h5>${ulist(p.contrapartidas)}<h5>Riscos</h5>${ulist(p.riscos)}<h5>Perguntas ao organizador</h5>${ulist(p.perguntas)}</div>
+      </details>
+      <div class="row"><select class="pr-status">${PSTATUS.map((s) => `<option ${p.status === s ? 'selected' : ''}>${s}</option>`).join('')}</select><button class="btn ghost pr-ask">💬 Escrever resposta</button></div>
+    </div>`;
+  }).join('') || '<p class="muted small">Nenhuma proposta ainda. Tire uma foto acima. 📷</p>';
+}
+$('#pr-list').addEventListener('change', (e) => {
+  const card = e.target.closest('.pr[data-id]'); if (!card || !e.target.classList.contains('pr-status')) return;
+  const p = db.proposal.get(card.dataset.id); if (p) put('proposal', p.id, { ...strip(p), status: e.target.value });
+});
+$('#pr-list').addEventListener('click', (e) => {
+  const card = e.target.closest('.pr[data-id]'); if (!card || !e.target.classList.contains('pr-ask')) return;
+  const p = db.proposal.get(card.dataset.id); if (!p) return;
+  ask(`Escreva uma resposta curta para o organizador da proposta "${p.titulo}" (${p.recomendacao}). Contraproposta sugerida: ${p.contraproposta || '—'}.`);
+});
+$('#props-open').addEventListener('click', () => { showTab('more'); showSub('proposals'); });
+function showSub(name) {
+  $$('#more-seg button').forEach((x) => x.classList.toggle('active', x.dataset.sub === name));
+  $$('.sub').forEach((v) => v.classList.toggle('active', v.dataset.subView === name));
+}
+
 function renderAll() {
   applyLook();
-  renderAlerts();
+  renderAlerts(); renderPend(); renderWait(); renderProposals(); renderRequests();
   renderLevel(); renderStats(); renderPlayer(); renderRoutines(); renderNext(); renderHabits();
   renderTasks(); renderReminders(); renderFocus(); renderNotes(); renderPc();
 }
